@@ -222,6 +222,7 @@ final class LidController {
 
         guard settings.enabled else {
             latch = nil
+            closedAwakeSince = nil
             apply(LidPolicy.Decision(keepAwake: false, reason: .off, latch: nil), lidClosed: false, now: now, settings: settings)
             return
         }
@@ -236,7 +237,11 @@ final class LidController {
         let power = machine.power()
         let lidClosed = machine.lidClosed()
         if summary.working > 0 { lastWorking = now }
-        if !lidClosed { closedAwakeSince = nil }
+        // The time limit and a latched cutout start over only when the lid is seen open (or the mode is switched off).
+        if !lidClosed {
+            closedAwakeSince = nil
+            latch = nil
+        }
 
         var input = LidPolicy.Input()
         input.settings = settings
@@ -259,7 +264,6 @@ final class LidController {
             renewLease(now: now)
         } else {
             awakeSince = nil
-            if decision.latch == nil { closedAwakeSince = nil }
             removeLease()
         }
 

@@ -71,11 +71,14 @@ if [ -n "${MT_PMSET:-}${MT_IOREG:-}${MT_ROOT:-}${MT_ONCE:-}" ]; then
 fi
 
 OWNED="$STATE/lid-owned"      # holds the time we turned sleep off; exists only while we did
-CAPPED="$STATE/lid-capped"    # exists after the 8-hour limit, until the lease lapses once
+CAPPED="$STATE/lid-capped"    # exists after the 8-hour limit, until there has been no lease for 10 minutes awake
+LAPSE="$STATE/lid-lapse"      # while capped and without a lease: "<since> <last seen>", both epochs
 STATUS="$STATE/lid-status"    # one line for the app: alive <epoch> sleepDisabled=<0|1|?> owned=<0|1> reason=<word>
 INTERVAL=5
 LEASE_AHEAD=120               # a lease may run at most this many seconds ahead
 CAP=28800                     # 8 hours awake in a row
+CAP_BREAK=600                 # the cap lifts after this long awake with no lease…
+CAP_GAP=30                    # …watched without a gap longer than this (a gap means the Mac slept, and starts it over)
 
 /bin/mkdir -p "$STATE" 2>/dev/null
 
@@ -199,12 +202,31 @@ step() {
     reason=invalid
   fi
 
-  # Eight hours awake in a row: stop honouring leases until one lapses.
-  if [ "$want" = 1 ]; then
-    if [ -e "$CAPPED" ]; then
+  # Eight hours awake in a row: stop honouring leases until there has been none for 10 minutes the Mac was awake.
+  # Brief lapses (a dark wake in a bag, a hung app) don't count, so they can't start another eight hours.
+  if [ -e "$CAPPED" ]; then
+    if [ "$want" = 1 ]; then
       want=0
       reason=cap
-    elif [ "$owned" = 1 ]; then
+      /bin/rm -f "$LAPSE"
+    else
+      c_line="$(/usr/bin/head -c 32 "$LAPSE" 2>/dev/null)"
+      c_since="${c_line%% *}"
+      c_last="${c_line#* }"
+      if ! is_number "$c_since" || ! is_number "$c_last" || [ "$c_since" -gt "$t" ] || [ "$c_last" -gt "$t" ] \
+        || [ $((t - c_last)) -gt "$CAP_GAP" ]; then
+        c_since="$t"
+      fi
+      if [ $((t - c_since)) -ge "$CAP_BREAK" ]; then
+        /bin/rm -f "$CAPPED" "$LAPSE"
+      else
+        printf '%s %s\n' "$c_since" "$t" >"$LAPSE" 2>/dev/null
+        [ "$reason" = idle ] && reason=cap
+      fi
+    fi
+  else
+    /bin/rm -f "$LAPSE"
+    if [ "$want" = 1 ] && [ "$owned" = 1 ]; then
       since="$(/usr/bin/head -c 16 "$OWNED" 2>/dev/null)"
       if is_number "$since" && [ $((t - since)) -ge "$CAP" ]; then
         : >"$CAPPED"
@@ -212,8 +234,6 @@ step() {
         reason=cap
       fi
     fi
-  else
-    /bin/rm -f "$CAPPED"
   fi
 
   if [ "$want" = 1 ]; then

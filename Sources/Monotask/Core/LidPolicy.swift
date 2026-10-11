@@ -64,7 +64,8 @@ enum LidReason: Equatable {
         }
     }
 
-    /// A safety cutout: once it fires with the lid closed it holds until the lid opens or the agents are done.
+    /// A safety cutout: once it fires with the lid closed it holds until the lid opens (or the mode is switched off),
+    /// whatever the agents, the helper or the sensors do in between: a Mac in a bag that dark-wakes mustn't re-arm.
     var isCutout: Bool {
         switch self {
         case .tooHot, .hot, .lowPowerMode, .onBattery, .batteryLow, .timeLimit, .noInternet: return true
@@ -142,22 +143,21 @@ enum LidPolicy {
         let sensors = input.sensors
         let now = input.now
         guard settings.enabled else { return Decision(keepAwake: false, reason: .off, latch: nil) }
-        guard sensors.helperReady else { return Decision(keepAwake: false, reason: .helperMissing, latch: nil) }
+        // Only an open lid lets go of a latch: a gap in the helper's reports keeps it.
+        let held = input.lid.closed ? latch.flatMap { $0.isCutout ? $0 : nil } : nil
+        guard sensors.helperReady else { return Decision(keepAwake: false, reason: .helperMissing, latch: held) }
 
         let working = input.activity.working
         let inGrace = input.activity.lastWorking.map { now.timeIntervalSince($0) < settings.grace } ?? false
-        let agentsActive = working > 0 || inGrace
 
-        // A cutout is held while the lid stays closed and the agents keep going, so the Mac never flip-flops between
-        // awake and asleep. It lets go when the lid opens, or once the agents are done anyway.
+        // A cutout is held while the lid stays closed, so the Mac never flip-flops between awake and asleep, and agents
+        // starting again in a bag don't wake it back up. It lets go when the lid opens.
         func cut(_ reason: LidReason) -> Decision {
-            Decision(keepAwake: false, reason: reason, latch: input.lid.closed && agentsActive ? reason : nil)
+            Decision(keepAwake: false, reason: reason, latch: input.lid.closed ? reason : nil)
         }
 
         if sensors.thermal == .critical { return cut(.tooHot) }
-        if let latch, latch.isCutout, input.lid.closed, agentsActive {
-            return Decision(keepAwake: false, reason: latch, latch: latch)
-        }
+        if let held { return Decision(keepAwake: false, reason: held, latch: held) }
         if settings.heatGuard, sensors.thermal.rawValue >= ProcessInfo.ThermalState.serious.rawValue,
            let since = sensors.seriousSince, now.timeIntervalSince(since) >= seriousHeatGrace {
             return cut(.hot)

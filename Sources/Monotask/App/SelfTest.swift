@@ -821,7 +821,12 @@ extension SelfTest {
               && decide({ $0.lid = LidPolicy.Lid(closed: false, awakeSince: nil) }, latch: .hot).latch == nil,
               "opening the lid lets go of the latch")
         let done = decide({ $0.activity = LidPolicy.Activity(working: 0, lastWorking: now.addingTimeInterval(-300)) }, latch: .batteryLow(20))
-        check(says(done, false, .idle) && done.latch == nil, "agents being done lets go of the latch")
+        check(says(done, false, .batteryLow(20)) && done.latch == .batteryLow(20),
+              "agents being done doesn't let go of the latch while the lid stays closed")
+        let missing = decide({ $0.sensors.helperReady = false }, latch: .timeLimit)
+        check(says(missing, false, .helperMissing) && missing.latch == .timeLimit, "the helper going quiet doesn't drop the latch")
+        check(decide({ $0.activity = LidPolicy.Activity() ; $0.sensors.lowPowerMode = true }).latch == .lowPowerMode,
+              "a cutout with the lid closed latches even when no agent is working")
         check(says(decide({ $0.sensors.thermal = .critical }, latch: .timeLimit), false, .tooHot), "critical heat wins over any latch")
         check(decide({ $0.lid = LidPolicy.Lid(closed: false, awakeSince: nil); $0.sensors.lowPowerMode = true }).latch == nil,
               "with the lid open a cutout doesn't latch")
@@ -838,7 +843,7 @@ extension SelfTest {
             }
             let first = LidPolicy.decide(input, latch: nil)
             check(first.latch == reason && LidPolicy.decide(base, latch: first.latch).reason == reason,
-                  "the \(reason) cutout latches until the lid opens or the agents are done")
+                  "the \(reason) cutout latches until the lid opens")
         }
 
         let texts = [LidReason.off, .helperMissing, .idle, .working(1), .working(3), .finishing, .tooHot, .hot,
@@ -1257,7 +1262,7 @@ extension SelfTest {
             put("causes", causes)
             put("pmset.log", "")
             for file in ["pmset-g-fails", "pmset-a-fails", "pmset-a-ignored", "pmset-slow"] { try? files.removeItem(at: scratch.appendingPathComponent(file)) }
-            for file in [owned, capped, lease] { try? files.removeItem(at: file) }
+            for file in [owned, capped, lease, state.appendingPathComponent("lid-lapse")] { try? files.removeItem(at: file) }
         }
         func epoch(_ offset: TimeInterval = 0) -> Int { Int(Date().timeIntervalSince1970 + offset) }
         func writeLease(_ text: String) {
@@ -1417,9 +1422,23 @@ extension SelfTest {
         run()
         check(flag() == "0" && !log().contains("disablesleep 1") && status().contains("reason=cap"),
               rule("…and keeps ignoring leases while the same lease is renewed"))
+        let lapse = state.appendingPathComponent("lid-lapse")
         try? files.removeItem(at: lease)
         run()
-        check(!files.fileExists(atPath: capped.path), rule("…until the lease lapses once"))
+        check(files.fileExists(atPath: capped.path) && files.fileExists(atPath: lapse.path),
+              rule("…and a brief lapse (a dark wake, say) doesn't lift it"))
+        writeLease("awake \(epoch(60))")
+        run()
+        check(flag() == "0" && files.fileExists(atPath: capped.path) && !files.fileExists(atPath: lapse.path) && status().contains("reason=cap"),
+              rule("…so a lease that comes back is still capped, and the lapse starts over"))
+        try? files.removeItem(at: lease)
+        try? Data("\(epoch(-700)) \(epoch(-3_600))\n".utf8).write(to: lapse)
+        run()
+        check(files.fileExists(atPath: capped.path), rule("…time the Mac spent asleep doesn't count toward the 10-minute break"))
+        try? Data("\(epoch(-700)) \(epoch(-5))\n".utf8).write(to: lapse)
+        run()
+        check(!files.fileExists(atPath: capped.path) && !files.fileExists(atPath: lapse.path),
+              rule("…it lifts after 10 minutes awake with no lease"))
         writeLease("awake \(epoch(60))")
         run()
         check(flag() == "1", rule("then a new lease works again"))
@@ -1755,6 +1774,18 @@ extension SelfTest {
         clock += 600
         controller.evaluate(activity: one)
         check(controller.decision.reason == .timeLimit && leaseText() == nil, "and it stays gone while the lid stays closed")
+        statusAge = 40
+        controller.evaluate(activity: one)
+        statusAge = 2
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit && leaseText() == nil,
+              "the helper going quiet for a moment doesn't reset the time limit")
+        clock += 600
+        controller.evaluate(activity: none)
+        clock += 600
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit && leaseText() == nil,
+              "agents stopping and starting again with the lid still closed don't reset it either")
         lidClosed = false
         controller.evaluate(activity: one)
         check(controller.decision.reason == .working(1), "opening the lid starts over")
