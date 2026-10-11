@@ -139,8 +139,14 @@ struct LidSettingsView: View {
 
             Section {
                 LabeledContent {
-                    Button("Remove Helper…") { controller.uninstall() }
-                        .disabled(controller.work != nil || (controller.helperState == .missing && !controller.settingStuck))
+                    HStack(spacing: 8) {
+                        if controller.helperState == .outdated {
+                            Button("Update Helper…") { controller.install(enableAfter: false) }
+                                .disabled(controller.work != nil)
+                        }
+                        Button("Remove Helper…") { controller.uninstall() }
+                            .disabled(controller.work != nil || (controller.helperState == .missing && !controller.settingStuck))
+                    }
                 } label: {
                     Text("Helper")
                     Text(Self.helperLine(controller.helperState))
@@ -165,7 +171,7 @@ struct LidSettingsView: View {
     static func helperLine(_ state: LidController.HelperState) -> String {
         switch state {
         case .missing: return "Not installed"
-        case .outdated: return "From another version of Monotask"
+        case .outdated: return "From another version of Monotask, so it isn't used"
         case .stale: return "Installed, not responding"
         case .running: return "Installed and running"
         }
@@ -206,7 +212,7 @@ struct LidStatusRow: View {
         if controller.startingSince != nil && controller.helperState != .running { return "Starting the helper…" }
         switch controller.helperState {
         case .missing: return "The helper isn't installed, so your Mac sleeps as usual."
-        case .outdated: return "The helper is from another version of Monotask."
+        case .outdated: return "The helper is from another version of Monotask. Update it to use it."
         case .stale: return "The helper isn't responding, so your Mac sleeps as usual."
         case .running: break
         }

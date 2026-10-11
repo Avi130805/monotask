@@ -34,7 +34,7 @@ enum LidHelper {
     /// The helper, run by launchd as `/bin/sh <this> <lease path> <uid>`. POSIX sh, absolute command paths, no eval.
     static let script = #"""
 #!/bin/sh
-# monotask-lid-helper 1
+# monotask-lid-helper 2
 #
 # Monotask's lid helper. It keeps this Mac awake with the lid closed ("pmset -a disablesleep 1") only while the
 # Monotask app holds a fresh lease, and turns sleep back on as soon as the lease lapses, whenever it starts (after a

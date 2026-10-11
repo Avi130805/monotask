@@ -25,7 +25,7 @@ struct LidMachine {
 final class LidController {
     enum HelperState: Equatable {
         case missing
-        /// Installed by another version of Monotask.
+        /// Installed by another version of Monotask (or for another user). Never used until it's updated.
         case outdated
         /// Installed, but hasn't checked in for 30 s.
         case stale
@@ -208,17 +208,19 @@ final class LidController {
         // The helper.
         let installed = machine.helperInstalled()
         let status = machine.helperStatus()
-        // Running means both: the files are in place and it checked in lately.
-        let fresh = installed != .missing && LidHelper.isFresh(status, now: now)
+        // Alive: the files are in place and it checked in lately. Ready (used) only if it's also exactly this build's
+        // helper for this user: an outdated one lacks the latest fixes, and another user's honours another lease.
+        let alive = installed != .missing && LidHelper.isFresh(status, now: now)
+        let fresh = installed == .current && alive
         let state: HelperState
         switch installed {
         case .missing: state = .missing
-        case .outdated: state = fresh ? .running : .outdated
+        case .outdated: state = .outdated
         case .current: state = fresh ? .running : .stale
         }
         if state != helperState { helperState = state }
         if startingSince != nil, fresh || (startingSince.map { now.timeIntervalSince($0) > 30 } ?? false) { startingSince = nil }
-        checkForStuckSetting(now: now, helperFresh: fresh)
+        checkForStuckSetting(now: now, helperFresh: alive)
 
         guard settings.enabled else {
             latch = nil

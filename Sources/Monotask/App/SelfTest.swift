@@ -1201,7 +1201,7 @@ extension SelfTest {
         check(bareMatches == 0, "the helper runs every outside command by its absolute path")
         check(!code.contains("eval") && !code.contains("`") && !code.contains("sudo") && !code.contains(" source ")
               && !code.contains("\n. ") && !code.contains("curl"), "the helper has no eval, no sourcing, no backticks, no network")
-        check(script.hasPrefix("#!/bin/sh\n# monotask-lid-helper 1\n"), "the helper is versioned")
+        check(script.hasPrefix("#!/bin/sh\n# monotask-lid-helper 2\n"), "the helper is versioned (2: the TERM, read-back and cap-break fixes)")
 
         let files = FileManager.default
         for shell in ["/bin/sh", "/bin/dash"] where files.isExecutableFile(atPath: shell) {
@@ -1744,6 +1744,10 @@ extension SelfTest {
         installed = .missing
         controller.evaluate(activity: one)
         check(controller.helperState == .missing && leaseText() == nil, "no helper installed: no lease")
+        installed = .outdated
+        controller.evaluate(activity: one)
+        check(controller.helperState == .outdated && controller.decision.reason == .helperMissing && leaseText() == nil,
+              "a helper from another version (or another user) that is running isn't used: no lease, and it asks to update")
         installed = .current
         statusAlive = false
         controller.evaluate(activity: one)
