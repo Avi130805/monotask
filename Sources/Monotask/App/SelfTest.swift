@@ -127,6 +127,9 @@ enum SelfTest {
         print("Lid-closed mode: install and remove")
         checkLidInstall(check)
 
+        print("Lid-closed mode: the app's side")
+        checkLidController(check, scratch: folder.appendingPathComponent("lid-app", isDirectory: true))
+
         print("Notch windows")
         check(NotchController.isMenuWindow(level: .popUpMenu), "a pop-up menu window is a menu")
         check(!NotchController.isMenuWindow(level: .normal) && !NotchController.isMenuWindow(level: .floating)
@@ -1582,3 +1585,203 @@ extension SelfTest {
     }
 }
 
+// MARK: - Lid-closed mode, the app's side
+
+/// Stand-ins for the real world: no network, no Wi-Fi changes, no Keychain.
+private final class FakePasswords: WiFiPasswordStoring, @unchecked Sendable {
+    var stored: [String: String] = [:]
+    func password(for ssid: String, interactive: Bool) -> String? { stored[ssid] }
+    func setPassword(_ password: String, for ssid: String) -> Bool { stored[ssid] = password; return true }
+    func removePassword(for ssid: String) { stored[ssid] = nil }
+}
+
+private struct FakeProber: ConnectivityProbing {
+    func probeRound() async -> [ProbeOutcome] { [.ok, .ok, .ok] }
+}
+
+private struct FakeWiFi: WiFiControlling {
+    func powerCycle(device: String) -> Failover.ActionOutcome { .failed }
+    func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome { .failed }
+}
+
+extension SelfTest {
+    fileprivate static func checkLidController(_ check: (Bool, String) -> Void, scratch: URL) {
+        let files = FileManager.default
+        try? files.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let suite = "monotask-selftest-lid-app-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            check(false, "test defaults are available")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        var clock = Date(timeIntervalSince1970: 1_800_000_000)
+        var thermal = ProcessInfo.ThermalState.nominal
+        var lidClosed = false
+        var installed = LidHelper.Installed.current
+        var statusAge: TimeInterval = 2
+        var statusAlive = true
+        var sleepDisabled: Bool? = false
+        var owned = false
+        var machine = LidMachine()
+        machine.now = { clock }
+        machine.thermal = { thermal }
+        machine.lowPowerMode = { false }
+        machine.power = { PowerSource.Reading(onBattery: false, percent: 90) }
+        machine.lidClosed = { lidClosed }
+        machine.sleepDisabled = { sleepDisabled }
+        machine.helperInstalled = { installed }
+        machine.helperStatus = {
+            LidHelper.Status(alive: statusAlive, at: clock.addingTimeInterval(-statusAge), sleepDisabled: false, owned: false, reason: "idle")
+        }
+        machine.ownedMarkerExists = { owned }
+
+        let passwords = FakePasswords()
+        let controller = LidController(dataFolder: scratch, defaults: defaults, machine: machine, interactive: false,
+                                       prober: FakeProber(), wifi: FakeWiFi(), passwords: passwords)
+        var commands: [Failover.Command] = []
+        controller.commandSink = { commands.append($0) }
+        let lease = controller.leaseURL
+        func leaseText() -> String? { try? String(contentsOf: lease, encoding: .utf8) }
+        let one = AgentActivity.Summary(working: 1, sessions: 1, hosts: ["claude": 1])
+        let none = AgentActivity.Summary()
+
+        check(lease.path == scratch.appendingPathComponent("lid/lease").path, "the lease lives at <data>/lid/lease")
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .off && leaseText() == nil, "off by default: an agent working writes no lease")
+
+        defaults.set(true, forKey: Prefs.lidEnabled)
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .working(1) && leaseText() == "awake \(Int(clock.timeIntervalSince1970) + 60)\n",
+              "switched on with an agent working: a lease that runs 60 s")
+        let mode = (try? files.attributesOfItem(atPath: lease.path))?[.posixPermissions] as? Int
+        check(mode == 0o644 && (try? lease.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == false,
+              "the lease is a plain file the helper can check")
+        let first = leaseText()
+        clock += 10
+        controller.evaluate(activity: one)
+        check(leaseText() == first, "it isn't rewritten every few seconds")
+        clock += 6
+        controller.evaluate(activity: one)
+        check(leaseText() == "awake \(Int(clock.timeIntervalSince1970) + 60)\n", "it is renewed every 15 s")
+        try? files.removeItem(at: lease)
+        clock += 5
+        controller.evaluate(activity: one)
+        check(leaseText() != nil, "a lease deleted from outside is written again")
+
+        clock += 60
+        controller.evaluate(activity: none)
+        check(controller.decision.reason == .finishing && leaseText() != nil, "agents just finished: still awake for the grace period")
+        clock += 121
+        controller.evaluate(activity: none)
+        check(controller.decision.reason == .idle && leaseText() == nil, "after the grace period the lease is deleted")
+
+        controller.evaluate(activity: one)
+        statusAge = 40
+        controller.evaluate(activity: one)
+        check(controller.helperState == .stale && controller.decision.reason == .helperMissing && leaseText() == nil,
+              "a helper that stopped checking in: no lease, and the window says so")
+        statusAge = 2
+        installed = .missing
+        controller.evaluate(activity: one)
+        check(controller.helperState == .missing && leaseText() == nil, "no helper installed: no lease")
+        installed = .current
+        statusAlive = false
+        controller.evaluate(activity: one)
+        check(controller.helperState == .stale && leaseText() == nil, "a helper that says it stopped isn't trusted")
+        statusAlive = true
+
+        // Heat, tracked over time by the controller.
+        thermal = .serious
+        controller.evaluate(activity: one)
+        check(controller.decision.keepAwake, "serious heat just now: not yet")
+        clock += 31
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .hot && leaseText() == nil, "serious heat for 30 s: the lease goes")
+        thermal = .nominal
+        clock += 5
+        controller.evaluate(activity: one)
+        check(controller.decision.keepAwake, "with the lid open the heat cutout doesn't hold once it cools")
+
+        // The time limit counts from the lid closing.
+        lidClosed = true
+        controller.evaluate(activity: one)
+        clock += 7_190
+        controller.evaluate(activity: one)
+        check(controller.decision.keepAwake, "just under 2 hours with the lid closed: awake")
+        clock += 15
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit && leaseText() == nil, "2 hours with the lid closed: the lease goes")
+        clock += 600
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit && leaseText() == nil, "and it stays gone while the lid stays closed")
+        lidClosed = false
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .working(1), "opening the lid starts over")
+
+        // Failover runs only with the lid closed, the Mac kept awake, and the setting on.
+        commands = []
+        defaults.set(true, forKey: Prefs.lidFailover)
+        clock += 30
+        controller.evaluate(activity: one)
+        check(commands.isEmpty && controller.networkStatus == "Watching only while the lid is closed and agents work.",
+              "lid open: failover does nothing")
+        lidClosed = true
+        clock += 5
+        controller.evaluate(activity: one)
+        check(commands.contains { if case .probe = $0 { return true } else { return false } } && controller.networkStatus == "Online",
+              "lid closed with an agent working: it starts probing")
+        commands = []
+        lidClosed = false
+        for _ in 0..<10 {
+            clock += 15
+            controller.evaluate(activity: one)
+        }
+        check(commands.isEmpty, "the lid opens: nothing more is probed or tried")
+        defaults.set(false, forKey: Prefs.lidFailover)
+
+        // A sleep setting left behind.
+        check(LidController.settingIsStuck(sleepDisabled: true, owned: true, helperFresh: false)
+              && !LidController.settingIsStuck(sleepDisabled: true, owned: false, helperFresh: false)
+              && !LidController.settingIsStuck(sleepDisabled: true, owned: true, helperFresh: true)
+              && !LidController.settingIsStuck(sleepDisabled: false, owned: true, helperFresh: false)
+              && !LidController.settingIsStuck(sleepDisabled: nil, owned: true, helperFresh: false),
+              "it warns only when sleep is off, Monotask's helper did it, and the helper isn't running to undo it")
+        sleepDisabled = true
+        owned = true
+        installed = .missing
+        controller.evaluate(activity: one)
+        clock += 40
+        controller.evaluate(activity: one)
+        check(controller.settingStuck, "a setting left behind is noticed (and, in a test run, no alert is shown)")
+        sleepDisabled = false
+        owned = false
+        installed = .current
+        controller.evaluate(activity: one)
+        check(!controller.settingStuck, "once sleep is back on, the warning goes")
+
+        // Fallback networks.
+        check(controller.addFallback(name: "  Studio Wi-Fi ", password: "hunter22") && controller.fallbacks == ["Studio Wi-Fi"]
+              && passwords.stored["Studio Wi-Fi"] == "hunter22", "a fallback network is added, its password in the Keychain")
+        check(controller.addFallback(name: "Avi's iPhone", password: "") && passwords.stored["Avi's iPhone"] == nil,
+              "a network without a password stores none")
+        check(!controller.addFallback(name: "Studio Wi-Fi", password: "x") && !controller.addFallback(name: "  ", password: "x")
+              && !controller.addFallback(name: String(repeating: "n", count: 33), password: "x")
+              && !controller.addFallback(name: "Two\nlines", password: ""),
+              "duplicates, blanks, names over 32 bytes and control characters are refused")
+        controller.moveFallback("Avi's iPhone", by: -1)
+        check(controller.fallbacks == ["Avi's iPhone", "Studio Wi-Fi"]
+              && defaults.stringArray(forKey: Prefs.lidFallbackNetworks) == ["Avi's iPhone", "Studio Wi-Fi"],
+              "the order can be changed, and is saved")
+        controller.moveFallback("Avi's iPhone", by: -1)
+        check(controller.fallbacks == ["Avi's iPhone", "Studio Wi-Fi"], "moving past the top does nothing")
+        controller.removeFallback("Studio Wi-Fi")
+        check(controller.fallbacks == ["Avi's iPhone"] && passwords.stored["Studio Wi-Fi"] == nil,
+              "removing a network deletes its password too")
+
+        controller.evaluate(activity: one)
+        check(leaseText() != nil, "a lease is held before quitting")
+        controller.stop()
+        check(leaseText() == nil, "quitting deletes the lease")
+    }
+}

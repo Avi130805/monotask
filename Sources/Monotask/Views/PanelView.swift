@@ -80,6 +80,10 @@ struct SettingsMenu: View {
         Menu {
             Button("Insights…") { model.onOpenInsights() }
             Button("Prompter…") { model.onOpenScript() }
+            Button("Lid-Closed Mode…") {
+                model.onClose()
+                NotificationCenter.default.post(name: .openLidWindow, object: nil)
+            }
             Button(model.prompterHotKeyLabel.isEmpty ? "Start Prompter" : "Start Prompter (\(model.prompterHotKeyLabel))") {
                 model.onStartPrompter()
             }
