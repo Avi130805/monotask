@@ -58,6 +58,11 @@ hook() {
 start_json() { printf '{"session_id":"%s","transcript_path":"/x","cwd":"/x","hook_event_name":"SessionStart","source":"%s"}' "$1" "$2"; }
 prompt_json() { printf '{\n  "session_id": "%s",\n  "cwd": "/x",\n  "hook_event_name": "UserPromptSubmit",\n  "prompt": "hello"\n}\n' "$1"; }
 stop_json() { printf '{"session_id":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$1"; }
+# A tool hook's input: the session id first, then the tool's arguments ($2, raw JSON; {} when left out).
+tool_json() {
+  args="${2:-}"; [ -n "$args" ] || args='{}'
+  printf '{"session_id":"%s","transcript_path":"/x","cwd":"/x","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":%s}' "$1" "$args"
+}
 
 EMPTY_NOTICE="Monotask update: the user's Do Now is empty now, so the earlier task is no longer in progress."
 FIXTURE_TEXT="$(cat "$FIXTURE"; printf x)"; FIXTURE_TEXT="${FIXTURE_TEXT%x}"
@@ -182,7 +187,7 @@ if [ "$OUT" = "$EMPTY_NOTICE
 # ------------------------------------------------------------------------------------------ robustness
 
 reset
-for ev in session-start prompt-submit stop session-end bogus; do
+for ev in session-start prompt-submit pre-tool post-tool stop session-end bogus; do
   for input in "" "garbage" "{" "}{[[" '{"session_id":' '{"session_id": 5}' '[1,2,3]' "$(printf '\001\002\377')"; do
     hook "$ev" "$input"
     if [ $RC -ne 0 ]; then fail "hook $ev with bad stdin exits 0" "rc=$RC input=$input"; fi
@@ -270,6 +275,77 @@ reset
 MONOTASK_HOME="$T/no-such-home"; export MONOTASK_HOME
 hook prompt-submit "$(prompt_json m3)" >/dev/null
 if [ ! -e "$T/no-such-home" ] && [ $RC -eq 0 ]; then pass "no markers (and no data folder created) when Monotask isn't installed"; else fail "no markers (and no data folder created) when Monotask isn't installed"; fi
+
+# Tool hooks: a running tool is "tool", a finished one is "busy" again. Lid-closed mode keeps the Mac awake longer for
+# "tool", because a long build or test run fires nothing until it ends.
+reset
+CLAUDECODE=1; export CLAUDECODE
+hook prompt-submit "$(prompt_json t1)" >/dev/null
+M="$T/home/agents/t1"
+hook pre-tool "$(tool_json t1 '{"command":"make test"}')"
+if grep -Eq '^tool [0-9]+ claude$' "$M" 2>/dev/null && [ "$(wc -l <"$M" | tr -d ' ')" = "1" ] && is_empty "$OUT" && [ $RC -eq 0 ]; then
+  pass "pre-tool writes 'tool <epoch> claude', silently"
+else
+  fail "pre-tool writes 'tool <epoch> claude', silently" "rc=$RC out=$OUT marker=$(cat "$M" 2>/dev/null)"
+fi
+hook post-tool "$(tool_json t1 '{"command":"make test"}')"
+if grep -Eq '^busy [0-9]+ claude$' "$M" 2>/dev/null && is_empty "$OUT" && [ $RC -eq 0 ]; then pass "post-tool writes 'busy <epoch> claude', silently"; else fail "post-tool writes 'busy <epoch> claude', silently" "$(cat "$M" 2>/dev/null)"; fi
+hook stop "$(stop_json t1)" >/dev/null
+hook session-end '{"session_id":"t1"}' >/dev/null
+if [ ! -e "$M" ] && [ "$(find "$T/home/agents" -name '.*' | wc -l | tr -d ' ')" = "0" ]; then pass "tool markers end with the session and leave no dot-files"; else fail "tool markers end with the session and leave no dot-files"; fi
+
+reset
+hook pre-tool "$(tool_json t5)"
+if [ ! -e "$T/plug/sessions/t5" ]; then pass "tool hooks keep no session state of their own"; else fail "tool hooks keep no session state of their own"; fi
+
+reset
+PLUGIN_DATA="$T/plug"; export PLUGIN_DATA
+hook pre-tool "$(tool_json t2)"
+if grep -Eq '^tool [0-9]+ codex$' "$T/home/agents/t2" 2>/dev/null; then pass "pre-tool marker host is codex when PLUGIN_DATA is set"; else fail "pre-tool marker host is codex when PLUGIN_DATA is set"; fi
+
+# A big tool input (a file being written) is drained, not parsed: the id still comes from its start.
+reset
+BIG="$(awk 'BEGIN { printf "\""; for (i = 0; i < 40000; i++) printf "0123456789"; printf "\"" }')"
+tool_json t3 "{\"content\":$BIG}" >"$T/big.json"
+t0="$(date +%s)"
+mt hook pre-tool <"$T/big.json" >"$T/out" 2>"$T/err"; RC=$?
+t1="$(date +%s)"
+if [ $RC -eq 0 ] && [ ! -s "$T/out" ] && grep -Eq '^tool [0-9]+ claude$' "$T/home/agents/t3" 2>/dev/null && [ $((t1 - t0)) -le 1 ]; then
+  pass "a 400 KB tool input is drained and still marks its session"
+else
+  fail "a 400 KB tool input is drained and still marks its session" "rc=$RC $(cat "$T/home/agents/t3" 2>/dev/null)"
+fi
+
+reset
+hook pre-tool '{"tool_name":"Bash","tool_input":{}}'
+if [ $RC -eq 0 ] && is_empty "$OUT" && [ "$(count_files "$T/home/agents")" = "0" ]; then pass "a tool hook without a session id writes nothing"; else fail "a tool hook without a session id writes nothing"; fi
+
+reset
+MONOTASK_HOME="$T/no-such-home"; export MONOTASK_HOME
+hook pre-tool "$(tool_json t4)"
+hook post-tool "$(tool_json t4)"
+if [ ! -e "$T/no-such-home" ] && [ $RC -eq 0 ]; then pass "tool hooks write nothing when Monotask isn't installed"; else fail "tool hooks write nothing when Monotask isn't installed"; fi
+
+reset
+CLAUDE_CODE_REMOTE=true; MONOTASK_HOME="$T/nonexistent"; export CLAUDE_CODE_REMOTE MONOTASK_HOME
+hook pre-tool "$(tool_json cloud)"
+if is_empty "$OUT" && [ $RC -eq 0 ] && [ ! -e "$T/nonexistent" ]; then pass "tool hooks stay silent in cloud sessions"; else fail "tool hooks stay silent in cloud sessions"; fi
+
+# ------------------------------------------------------------------------------------------ hooks.json
+
+# Every event runs the same handler. Codex trusts hooks by a hash of each entry, so the four older ones must stay as
+# they were; these lines are exactly what they have always been.
+HOOKS="$HERE/../hooks/hooks.json"
+for pair in SessionStart:session-start UserPromptSubmit:prompt-submit Stop:stop SessionEnd:session-end PreToolUse:pre-tool PostToolUse:post-tool; do
+  name="${pair%%:*}"; ev="${pair#*:}"
+  line="            \"command\": \"\\\"\${CLAUDE_PLUGIN_ROOT}/bin/monotask\\\" hook $ev || true\","
+  if grep -q "^    \"$name\": \[\$" "$HOOKS" && [ "$(grep -cF "$line" "$HOOKS")" = "1" ]; then
+    pass "hooks.json: $name runs 'hook $ev' with the shared handler"
+  else
+    fail "hooks.json: $name runs 'hook $ev' with the shared handler" "$line"
+  fi
+done
+if [ "$(grep -c '"timeout": 5$' "$HOOKS")" = "6" ] && [ "$(grep -c '"type": "command",$' "$HOOKS")" = "6" ]; then pass "hooks.json: six command hooks, 5 s timeout each"; else fail "hooks.json: six command hooks, 5 s timeout each"; fi
 
 # ------------------------------------------------------------------------------------------ add
 
@@ -405,19 +481,24 @@ now_ms() {
 reset
 CLAUDECODE=1; export CLAUDECODE
 RUNS=10
-for ev in session-start prompt-submit stop session-end; do
+# Tool hooks fire around every tool call, so they get the tighter budget.
+for ev in session-start prompt-submit stop session-end pre-tool post-tool; do
+  case "$ev" in
+    pre-tool|post-tool) input="$(tool_json timing '{"command":"npm test"}')"; budget=50 ;;
+    *) input="$(start_json timing startup)"; budget=100 ;;
+  esac
   t0="$(now_ms)"
   i=0
   while [ $i -lt $RUNS ]; do
-    printf '%s' "$(start_json timing startup)" | mt hook "$ev" >/dev/null 2>&1
+    printf '%s' "$input" | mt hook "$ev" >/dev/null 2>&1
     i=$((i + 1))
   done
   t1="$(now_ms)"
   avg=$(( (t1 - t0) / RUNS ))
   if command -v perl >/dev/null 2>&1; then
-    limit=100
+    limit=$budget
   else
-    limit=200   # whole-second clock: allow one second of slack over $RUNS runs
+    limit=$((budget + 100))   # whole-second clock: allow one second of slack over $RUNS runs
   fi
   if [ $avg -le $limit ]; then pass "hook $ev averages ${avg} ms (limit ${limit})"; else fail "hook $ev averages ${avg} ms (limit ${limit})"; fi
 done
