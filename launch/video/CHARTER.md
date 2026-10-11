@@ -40,7 +40,7 @@ Write only inside `launch/video/` (and temp folders outside the repo). Never edi
    | v08-closed-wings | closed: amber live dot and timer either side of the camera |
    | v09-peek-chin | hover: the chin with the task and finish line |
    | v10-flash-added-side | closed with wings and the "Added to Do Next" chin (after the agent parks the side task) |
-   | v11-open-side-task | open: Do Now card, Do Next now includes "Fix flaky auth test" |
+   | v11-open-side-task | open: Do Now card, Do Next now includes "Fix failing email digest test" (the title Claude chose in take r1-take1) |
    | v12a-holding-start / v12-holding / v12b-holding-full | the hold button pressed at 0 %, 60 % and 100 % (label "Keep holding…", finish line highlighted) |
    | v13-done | the button turns green: "Done" |
    | v14-open-finished | Do Now empty, header "1 done this week" |
@@ -143,3 +143,13 @@ Write `launch/video/setup.sh` (idempotent; it runs as root on Ubuntu 24.04 with 
 ## FINISH LINE
 
 Both MP4s, the poster, the GIF and BEATS.md are committed and pushed on your lane branch, and every proof step has been recorded in the ledger. Large binaries are fine (each under 90 MB). Don't commit `node_modules` or Chromium: add a `.gitignore` inside `launch/video/`.
+
+## Round 2 (re-render; lane `video2`)
+
+The first round is merged into main (`launch/video/work`, `launch/video/record`, `launch/video/out`). Re-render from it. Don't re-record R1: keep take `r1-take1`, so the agent's words stay exactly as recorded.
+
+1. **New notch frames.** `launch/video/assets/notch/v10`–`v14` now show the side task as "Fix failing email digest test", the title Claude chose in `r1-take1`. Before, the frames said "Fix flaky auth test" and didn't match. Use the new frames everywhere.
+2. **Opening caption.** Break it into two balanced lines in both cuts: "One task. One finish line." / "Your coding agents know both." No orphan words in any caption. Use balanced wrapping or explicit breaks.
+3. **Close-ups.** When the frame scale makes the menu bar's titles or clock run off the frame edge, fade them out, and bring them back in the wide shots. Nothing on screen may be clipped mid-word.
+4. **Codex.** If a variable named `OPENAI_API_KEY` exists now (check the name, never print it), install Codex and record R2 as the charter describes, then replace the Codex card in both cuts with the real session. If not, keep the card.
+5. Re-render both MP4s, the poster and the GIF, and update `BEATS.md`. Run the same proof (ffprobe, one frame per beat that you look at, GIF size). Change nothing else.

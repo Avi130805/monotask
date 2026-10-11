@@ -163,7 +163,7 @@ enum Snapshots {
             ("v08-closed-wings", { model.mode = .closed }),
             ("v09-peek-chin", { model.mode = .peek; model.peekDetail = true }),
             ("v10-flash-added-side", {
-                store.capture("Fix flaky auth test")
+                store.capture("Fix failing email digest test")
                 model.peekDetail = false
                 model.mode = .closed
                 model.flash = added()
