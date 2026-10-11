@@ -92,7 +92,7 @@ struct SettingsMenu: View {
                 set: { launchAtLogin = LaunchAtLogin.set($0) }
             ))
             Divider()
-            Button("Quit Next") { NSApp.terminate(nil) }
+            Button("Quit Monotask") { NSApp.terminate(nil) }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .bold))

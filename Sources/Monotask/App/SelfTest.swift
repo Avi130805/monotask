@@ -1,7 +1,7 @@
 import Foundation
 
 /// Exercises the Do Now / Do Next rules, the event history, the insight maths and the prompter's markup and timing
-/// against throwaway files. Run with `Next --selftest`.
+/// against throwaway files. Run with `Monotask --selftest`.
 @MainActor
 enum SelfTest {
     static func run() -> Bool {
@@ -11,7 +11,7 @@ enum SelfTest {
             if !passed { failures += 1 }
         }
 
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("next-selftest-\(UUID().uuidString)", isDirectory: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("monotask-selftest-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let stateURL = folder.appendingPathComponent("state.json")
         let eventsURL = folder.appendingPathComponent("events.jsonl")
@@ -106,8 +106,50 @@ enum SelfTest {
               && (try? Data(contentsOf: stateURL)) == listBefore && (try? Data(contentsOf: eventsURL)) == historyBefore,
               "prompting never touches the list or the event history, so it can't count as a task or reach Insights")
 
+        print("Moving from Next")
+        checkMigration(check, scratch: folder.appendingPathComponent("migration", isDirectory: true), list: stateURL)
+
         print(failures == 0 ? "All checks passed." : "\(failures) check(s) failed.")
         return failures == 0
+    }
+
+    private static func checkMigration(_ check: (Bool, String) -> Void, scratch: URL, list: URL) {
+        let files = FileManager.default
+        let old = scratch.appendingPathComponent("Next", isDirectory: true)
+        let new = scratch.appendingPathComponent("Monotask", isDirectory: true)
+        let suite = "monotask-selftest-\(UUID().uuidString)"
+        let oldSuite = suite + "-old"
+        guard let defaults = UserDefaults(suiteName: suite), let oldDefaults = UserDefaults(suiteName: oldSuite) else {
+            check(false, "test defaults are available")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            oldDefaults.removePersistentDomain(forName: oldSuite)
+        }
+        try? files.createDirectory(at: old, withIntermediateDirectories: true)
+
+        try? Data("not a list".utf8).write(to: old.appendingPathComponent("state.json"))
+        check(!LegacyData.migrate(from: old, to: new, defaults: defaults, oldDefaults: oldDefaults)
+              && !files.fileExists(atPath: new.path), "another app's Next folder is left alone")
+
+        try? files.removeItem(at: old.appendingPathComponent("state.json"))
+        try? files.copyItem(at: list, to: old.appendingPathComponent("state.json"))
+        try? Data("script".utf8).write(to: old.appendingPathComponent("prompter.txt"))
+        oldDefaults.set(true, forKey: Prefs.openOnHover)
+        oldDefaults.set(false, forKey: Prefs.haptics)
+        defaults.set(true, forKey: Prefs.haptics)
+        check(LegacyData.migrate(from: old, to: new, defaults: defaults, oldDefaults: oldDefaults)
+              && (try? Data(contentsOf: new.appendingPathComponent("state.json"))) == (try? Data(contentsOf: list))
+              && files.fileExists(atPath: new.appendingPathComponent("prompter.txt").path),
+              "Next's list and files are copied into Monotask's folder")
+        check(files.fileExists(atPath: old.appendingPathComponent("state.json").path), "Next's own files are kept")
+        check(defaults.bool(forKey: Prefs.openOnHover) && defaults.bool(forKey: Prefs.haptics),
+              "Next's settings carry over without overwriting ones Monotask already has")
+        try? Data("{}".utf8).write(to: old.appendingPathComponent("state.json"))
+        check(!LegacyData.migrate(from: old, to: new, defaults: defaults, oldDefaults: oldDefaults)
+              && (try? Data(contentsOf: new.appendingPathComponent("state.json"))) == (try? Data(contentsOf: list)),
+              "it only ever copies once")
     }
 
     /// Fixed clock and calendar (UTC, weeks from Monday), with a hand-made history whose answers are known.

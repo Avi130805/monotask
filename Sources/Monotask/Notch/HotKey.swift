@@ -44,7 +44,7 @@ final class HotKey {
     static func registerFirstAvailable(_ combos: [Combo], action: @escaping () -> Void) -> HotKey? {
         for combo in combos {
             if let hotKey = register(combo, action: action) { return hotKey }
-            NSLog("Next: \(combo.label) is taken, trying the next shortcut")
+            NSLog("Monotask: \(combo.label) is taken, trying the next shortcut")
         }
         return nil
     }

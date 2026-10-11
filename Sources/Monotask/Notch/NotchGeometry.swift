@@ -13,7 +13,7 @@ extension NSScreen {
         return CGSize(width: 180, height: max(24, frame.maxY - visibleFrame.maxY))
     }
 
-    /// Where Next lives: the built-in display with a notch, if one is connected.
+    /// Where Monotask lives: the built-in display with a notch, if one is connected.
     static var notchHost: NSScreen? {
         screens.first(where: \.hasNotch) ?? main ?? screens.first
     }

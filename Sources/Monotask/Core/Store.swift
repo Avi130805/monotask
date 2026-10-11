@@ -31,14 +31,14 @@ final class Store {
                 try FileManager.default.createDirectory(at: eventsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try EventFile.write(events, to: eventsURL)
             } catch {
-                NSLog("Next: couldn't start the event history: \(error.localizedDescription)")
+                NSLog("Monotask: couldn't start the event history: \(error.localizedDescription)")
             }
         }
     }
 
     nonisolated static var defaultFileURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Next", isDirectory: true)
+            .appendingPathComponent("Monotask", isDirectory: true)
             .appendingPathComponent("state.json")
     }
 
@@ -205,7 +205,7 @@ final class Store {
             try FileManager.default.createDirectory(at: eventsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try EventFile.append(event, to: eventsURL)
         } catch {
-            NSLog("Next: couldn't record a \(kind.rawValue) event: \(error.localizedDescription)")
+            NSLog("Monotask: couldn't record a \(kind.rawValue) event: \(error.localizedDescription)")
         }
     }
 
@@ -226,7 +226,7 @@ final class Store {
             backUpOncePerDay()
             try Store.encoder.encode(state).write(to: fileURL, options: .atomic)
         } catch {
-            NSLog("Next: couldn't save: \(error.localizedDescription)")
+            NSLog("Monotask: couldn't save: \(error.localizedDescription)")
         }
     }
 
@@ -248,6 +248,11 @@ final class Store {
         }
     }
 
+    /// Whether `data` is a list this app (or Next before it) saved.
+    nonisolated static func isStateFile(_ data: Data) -> Bool {
+        (try? decoder.decode(AppState.self, from: data)) != nil
+    }
+
     private static func load(from url: URL) -> AppState {
         guard let data = try? Data(contentsOf: url) else { return AppState() }
         do {
@@ -256,7 +261,7 @@ final class Store {
             // Never overwrite a file we couldn't read: move it aside so it can be recovered.
             let aside = url.deletingPathExtension().appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970)).json")
             try? FileManager.default.moveItem(at: url, to: aside)
-            NSLog("Next: couldn't read \(url.path), moved it to \(aside.lastPathComponent): \(error)")
+            NSLog("Monotask: couldn't read \(url.path), moved it to \(aside.lastPathComponent): \(error)")
             return AppState()
         }
     }
@@ -268,7 +273,7 @@ final class Store {
         return encoder
     }()
 
-    private static let decoder: JSONDecoder = {
+    nonisolated private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder

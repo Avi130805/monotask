@@ -7,15 +7,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private var prompterHotKey: HotKey?
 
-    private static let openRequest = Notification.Name("com.yoooo.Next.open")
+    private static let openRequest = Notification.Name("io.github.avi130805.Monotask.open")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if handOffToRunningCopy() { return }
 
         installMainMenu()
 
-        // NEXT_STATE_FILE points a test run at throwaway data instead of your real list.
-        let file = ProcessInfo.processInfo.environment["NEXT_STATE_FILE"].map { URL(fileURLWithPath: $0) }
+        // MONOTASK_STATE_FILE points a test run at throwaway data instead of your real list.
+        let file = ProcessInfo.processInfo.environment["MONOTASK_STATE_FILE"].map { URL(fileURLWithPath: $0) }
+        if file == nil { LegacyData.migrate() }
         let store = Store(fileURL: file ?? Store.defaultFileURL)
         // The prompter script sits beside the list, so a test run's script is throwaway too.
         let script = file.map { $0.deletingLastPathComponent().appendingPathComponent("prompter.txt") }
@@ -43,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store?.saveNow()
     }
 
-    /// Opening Next while it's already running opens the notch of the running copy instead.
+    /// Opening Monotask while it's already running opens the notch of the running copy instead.
     private func handOffToRunningCopy() -> Bool {
         guard let id = Bundle.main.bundleIdentifier else { return false }
         let me = ProcessInfo.processInfo.processIdentifier
@@ -55,10 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Text fields need an Edit menu for ⌘C, ⌘V, ⌘A and ⌘Z, and the Insights window needs ⌘W.
-    /// There's deliberately no ⌘Q: while you type in the notch, it would quit Next instead of your app.
+    /// There's deliberately no ⌘Q: while you type in the notch, it would quit Monotask instead of your app.
     private func installMainMenu() {
-        let app = NSMenu(title: "Next")
-        app.addItem(withTitle: "Quit Next", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        let app = NSMenu(title: "Monotask")
+        app.addItem(withTitle: "Quit Monotask", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         let appItem = NSMenuItem()
         appItem.submenu = app
 

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Builds build/Next.app with only the Command Line Tools.
+# Builds build/Monotask.app with only the Command Line Tools.
 #   --run      launch it afterwards
 #   --install  copy it to /Applications first (launch at login works best from there)
 set -euo pipefail
@@ -12,10 +12,10 @@ fi
 
 swift build -c release
 
-app=build/Next.app
+app=build/Monotask.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp .build/release/Next "$app/Contents/MacOS/Next"
+cp .build/release/Monotask "$app/Contents/MacOS/Monotask"
 cp Resources/Info.plist "$app/Contents/Info.plist"
 cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 codesign --force --sign - "$app" 2>/dev/null
@@ -31,21 +31,21 @@ for arg in "$@"; do
 done
 
 if $install || $run; then
-  pkill -f "Next.app/Contents/MacOS/Next" 2>/dev/null || true
+  pkill -f "Monotask.app/Contents/MacOS/Monotask" 2>/dev/null || true
   sleep 0.5
 fi
 
 if $install; then
-  if [[ -d /Applications/Next.app ]]; then
-    existing=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /Applications/Next.app/Contents/Info.plist 2>/dev/null || echo unknown)
-    if [[ $existing != com.yoooo.Next ]]; then
-      echo "/Applications/Next.app is a different app ($existing); leaving it alone." >&2
+  if [[ -d /Applications/Monotask.app ]]; then
+    existing=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /Applications/Monotask.app/Contents/Info.plist 2>/dev/null || echo unknown)
+    if [[ $existing != io.github.avi130805.Monotask ]]; then
+      echo "/Applications/Monotask.app is a different app ($existing); leaving it alone." >&2
       exit 1
     fi
-    rm -rf /Applications/Next.app
+    rm -rf /Applications/Monotask.app
   fi
-  cp -R "$app" /Applications/Next.app
-  app=/Applications/Next.app
+  cp -R "$app" /Applications/Monotask.app
+  app=/Applications/Monotask.app
   echo "Installed $app"
 fi
 

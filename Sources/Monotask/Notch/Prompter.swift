@@ -84,13 +84,13 @@ final class Prompter {
                 try files.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try PromptScript.sample.write(to: fileURL, atomically: true, encoding: .utf8)
             } catch {
-                NSLog("Next: couldn't write the sample prompter script: \(error.localizedDescription)")
+                NSLog("Monotask: couldn't write the sample prompter script: \(error.localizedDescription)")
             }
         }
         do {
             apply(try String(contentsOf: fileURL, encoding: .utf8))
         } catch {
-            NSLog("Next: couldn't read \(fileURL.path), showing the sample instead: \(error.localizedDescription)")
+            NSLog("Monotask: couldn't read \(fileURL.path), showing the sample instead: \(error.localizedDescription)")
             apply(PromptScript.sample)
         }
     }
@@ -102,7 +102,7 @@ final class Prompter {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try newText.write(to: fileURL, atomically: true, encoding: .utf8)
         } catch {
-            NSLog("Next: couldn't save the prompter script: \(error.localizedDescription)")
+            NSLog("Monotask: couldn't save the prompter script: \(error.localizedDescription)")
             return false
         }
         let changed = newText != text

@@ -12,6 +12,9 @@ enum Prefs {
     static let prompterWPM = "prompterWPM"
     static let prompterStep = "prompterStep"
     static let prompterScript = "prompterScriptFingerprint"
+
+    /// Every key, for carrying settings over from Next.
+    static let all = [openOnHover, showWings, haptics, prompterMode, prompterWPM, prompterStep, prompterScript]
 }
 
 /// Trackpad feedback. Only Force Touch trackpads can play it.
@@ -38,7 +41,7 @@ enum LaunchAtLogin {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            NSLog("Next: couldn't change launch at login: \(error.localizedDescription)")
+            NSLog("Monotask: couldn't change launch at login: \(error.localizedDescription)")
         }
         return isEnabled
     }

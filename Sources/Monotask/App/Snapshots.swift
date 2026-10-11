@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// `Next --snapshot <folder>` renders the main notch states, the prompter, the Insights window and the script
+/// `Monotask --snapshot <folder>` renders the main notch states, the prompter, the Insights window and the script
 /// editor, with demo data, to PNGs. Windows are parked off-screen, so it needs no screen recording permission and
 /// never touches your real list or script.
 @MainActor
@@ -11,7 +11,7 @@ enum Snapshots {
         app.setActivationPolicy(.accessory)
         let files = FileManager.default
         try? files.createDirectory(at: folder, withIntermediateDirectories: true)
-        let scratch = files.temporaryDirectory.appendingPathComponent("next-snapshot-\(UUID().uuidString)", isDirectory: true)
+        let scratch = files.temporaryDirectory.appendingPathComponent("monotask-snapshot-\(UUID().uuidString)", isDirectory: true)
         try? files.createDirectory(at: scratch, withIntermediateDirectories: true)
 
         let store = Store(fileURL: scratch.appendingPathComponent("notch.json"),

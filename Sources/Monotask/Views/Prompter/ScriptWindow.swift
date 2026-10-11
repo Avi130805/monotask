@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The prompter script's window. Like Insights, Next shows in the Dock while it's open so it can't get lost, and
-/// closing it puts Next back in the notch only.
+/// The prompter script's window. Like Insights, Monotask shows in the Dock while it's open so it can't get lost, and
+/// closing it puts Monotask back in the notch only.
 @MainActor
 final class ScriptWindow: NSObject, NSWindowDelegate {
     var onStart: () -> Void = {}
@@ -47,7 +47,7 @@ final class ScriptWindow: NSObject, NSWindowDelegate {
         guard prompter.save(draft.text) else {
             let alert = NSAlert()
             alert.messageText = "Couldn't save the script"
-            alert.informativeText = "Next couldn't write \((prompter.fileURL.path as NSString).abbreviatingWithTildeInPath). Your text is still here."
+            alert.informativeText = "Monotask couldn't write \((prompter.fileURL.path as NSString).abbreviatingWithTildeInPath). Your text is still here."
             alert.runModal()
             return false
         }

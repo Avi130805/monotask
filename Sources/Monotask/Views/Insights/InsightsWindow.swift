@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The Insights window. While it's open, Next shows in the Dock and the app switcher like a normal app,
-/// so the window can't get lost behind others; closing it puts Next back in the notch only.
+/// The Insights window. While it's open, Monotask shows in the Dock and the app switcher like a normal app,
+/// so the window can't get lost behind others; closing it puts Monotask back in the notch only.
 @MainActor
 final class InsightsWindow: NSObject, NSWindowDelegate {
     private let store: Store

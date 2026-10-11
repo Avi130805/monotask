@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Next",
+    name: "Monotask",
     platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
-            name: "Next",
-            path: "Sources/Next",
+            name: "Monotask",
+            path: "Sources/Monotask",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
