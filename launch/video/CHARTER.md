@@ -153,3 +153,13 @@ The first round is merged into main (`launch/video/work`, `launch/video/record`,
 3. **Close-ups.** When the frame scale makes the menu bar's titles or clock run off the frame edge, fade them out, and bring them back in the wide shots. Nothing on screen may be clipped mid-word.
 4. **Codex.** If a variable named `OPENAI_API_KEY` exists now (check the name, never print it), install Codex and record R2 as the charter describes, then replace the Codex card in both cuts with the real session. If not, keep the card.
 5. Re-render both MP4s, the poster and the GIF, and update `BEATS.md`. Run the same proof (ffprobe, one frame per beat that you look at, GIF size). Change nothing else.
+
+## Round 3 (lane `video3`): framing in the terminal beats
+
+Round 2 is merged. Fix only this, in both cuts, then re-render (both MP4s, the poster, the GIF; update `BEATS.md`):
+
+1. **No terminal row may be cut by the frame edge.** In beat 5's push-in (and the short cut's equivalent), the input row is clipped at the bottom edge at zoom 1.38. Choose the camera target and zoom so every frame edge falls between rows, or zoom less. Extend `work/check-layout.mjs` to fail on any partially visible terminal row inside the frame, at every sampled frame of the terminal beats.
+2. **Captions never cover terminal text.** In the terminal beats, move the caption pill so it doesn't overlap any rendered terminal text. For example, sit it above the terminal window under the notch, or shrink the terminal so it fits above the caption. Make `check-layout.mjs` fail on any caption/terminal-text overlap.
+3. Keep everything else as it is: the same take, frames, captions, timing and rhythm.
+
+Run the proof again. In the ledger, include the layout check's before and after output.
