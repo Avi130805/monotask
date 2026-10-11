@@ -325,6 +325,18 @@ enum SelfTest {
         oldDefaults.set(true, forKey: Prefs.openOnHover)
         oldDefaults.set(false, forKey: Prefs.haptics)
         defaults.set(true, forKey: Prefs.haptics)
+
+        // A copy that fails halfway leaves nothing behind, so the next launch can try again.
+        let locked = old.appendingPathComponent("locked.bin")
+        try? Data("unreadable".utf8).write(to: locked)
+        try? files.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        let failed = !LegacyData.migrate(from: old, to: new, defaults: defaults, oldDefaults: oldDefaults)
+        check(failed && !files.fileExists(atPath: new.path)
+              && ((try? files.contentsOfDirectory(atPath: scratch.path)) ?? []).sorted() == ["Next"],
+              "a copy that fails halfway leaves no partial folder or leftovers")
+        check(!defaults.bool(forKey: Prefs.openOnHover), "settings are not carried over when the copy failed")
+        try? files.setAttributes([.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        try? files.removeItem(at: locked)
         check(LegacyData.migrate(from: old, to: new, defaults: defaults, oldDefaults: oldDefaults)
               && (try? Data(contentsOf: new.appendingPathComponent("state.json"))) == (try? Data(contentsOf: list))
               && files.fileExists(atPath: new.appendingPathComponent("prompter.txt").path),

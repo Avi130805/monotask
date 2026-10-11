@@ -12,7 +12,8 @@ enum LegacyData {
     }
 
     /// Copies `from` to `to` once, and only when `to` doesn't exist yet and `from` holds a list Next itself wrote
-    /// (another app could also be called Next). Returns whether it copied.
+    /// (another app could also be called Next). A failed copy leaves nothing behind, so the next launch tries again.
+    /// Returns whether it copied.
     @discardableResult
     static func migrate(from old: URL = oldFolder, to new: URL = Store.defaultFileURL.deletingLastPathComponent(),
                         defaults: UserDefaults = .standard, oldDefaults: UserDefaults? = UserDefaults(suiteName: oldBundleID)) -> Bool {
@@ -20,10 +21,17 @@ enum LegacyData {
         guard !files.fileExists(atPath: new.path),
               let data = try? Data(contentsOf: old.appendingPathComponent("state.json")),
               Store.isStateFile(data) else { return false }
+        // Copy beside the destination first and move it into place only once it is whole. A copy that dies halfway
+        // (disk full, an unreadable file) would otherwise leave a partial folder, and the "to doesn't exist yet"
+        // check above would then keep every later launch from trying again.
+        let staging = new.deletingLastPathComponent().appendingPathComponent(".\(new.lastPathComponent)-migrating", isDirectory: true)
         do {
             try files.createDirectory(at: new.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try files.copyItem(at: old, to: new)
+            try? files.removeItem(at: staging)
+            try files.copyItem(at: old, to: staging)
+            try files.moveItem(at: staging, to: new)
         } catch {
+            try? files.removeItem(at: staging)
             NSLog("Monotask: couldn't copy your list from Next: \(error.localizedDescription)")
             return false
         }
