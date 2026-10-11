@@ -1,0 +1,309 @@
+#!/bin/sh
+# monotask - the coding-agent side of Monotask (https://github.com/Avi130805/monotask).
+#
+#   monotask now                 print the user's current Do Now (what the app wrote to agent-context.md)
+#   monotask add "<title>"       queue an item for the user's Do Next
+#   monotask hook <event>        host hook entry point (session-start | prompt-submit | stop | session-end)
+#   monotask --version | help
+#
+# Information only flows into agents: nothing here starts, changes or finishes the Do Now.
+# POSIX sh plus sed, awk, tr, cksum, mkdir, mv, date, find, cat, head, od, cut. No jq, python or node.
+
+VERSION="1.0.0"
+CONTEXT_NAME="agent-context.md"
+MAX_TITLE=200
+MAX_CONTEXT_BYTES=8192
+STALE_DAYS=7
+
+data_dir() {
+  if [ -n "${MONOTASK_HOME:-}" ]; then
+    printf '%s' "$MONOTASK_HOME"
+  else
+    printf '%s' "${HOME:-/}/Library/Application Support/Monotask"
+  fi
+}
+
+tmp_root() {
+  t="${TMPDIR:-/tmp}"
+  printf '%s' "${t%/}"
+}
+
+# Absolute path of this script, for the "add" command line shown to hosts that don't put bin/ on PATH.
+self_path() {
+  p="$0"
+  case "$p" in
+    */*) ;;
+    *) p="$(command -v "$p" 2>/dev/null || printf '%s' "$p")" ;;
+  esac
+  d="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)"
+  if [ -n "$d" ]; then printf '%s/%s' "$d" "$(basename "$p")"; else printf '%s' "$p"; fi
+}
+
+usage() {
+  cat <<'EOF'
+monotask - Monotask for coding agents
+
+Usage:
+  monotask now                 Print the user's current task (Do Now) and what done means.
+  monotask add "<title>"       Add an item to the user's Do Next (ask the user first).
+  monotask hook <event>        Used by the Claude Code / Codex plugin hooks.
+  monotask --version
+  monotask help
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------- now
+
+cmd_now() {
+  f="$(data_dir)/$CONTEXT_NAME"
+  if [ -s "$f" ]; then
+    cat "$f"
+  else
+    echo "No task in Do Now."
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------------------------- add
+
+# First non-blank line, tabs to spaces, control characters dropped, trimmed, capped at $MAX_TITLE characters.
+clean_title() {
+  printf '%s\n' "$1" |
+    awk 'NF { print; exit }' |
+    tr '\t' ' ' |
+    tr -d '\001-\010\013-\037\177' |
+    sed 's/^[[:space:]]*//; s/[[:space:]]*$//' |
+    cut -c1-"$MAX_TITLE" |
+    { if command -v iconv >/dev/null 2>&1; then iconv -f UTF-8 -t UTF-8 -c 2>/dev/null; else cat; fi; } |
+    sed 's/[[:space:]]*$//'
+}
+
+random_hex() {
+  r="$(od -An -N4 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
+  [ -n "$r" ] || r="$(printf '%s%s' "$(date +%s)" "$$" | cksum | tr -d ' ')"
+  printf '%s' "$r"
+}
+
+# Writes "$2" (a line) to "$1/<name>" atomically: a dot-file in the same folder, then mv. $3 is the file name.
+write_atomic() {
+  dir="$1"; line="$2"; name="$3"
+  tmp="$dir/.$name.$$"
+  if printf '%s\n' "$line" 2>/dev/null >"$tmp" && mv -f "$tmp" "$dir/$name" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return 1
+}
+
+# Try to queue "$2" into folder "$1". Returns non-zero if the folder can't be used.
+queue_into() {
+  dir="$1"; title="$2"
+  [ -d "$dir" ] && [ -w "$dir" ] || return 1
+  name="$(date -u +%Y%m%dT%H%M%SZ)-$$-$(random_hex).txt"
+  write_atomic "$dir" "$title" "$name"
+}
+
+cmd_add() {
+  title="$(clean_title "$*")"
+  if [ -z "$title" ]; then
+    echo 'monotask: nothing to add. Usage: monotask add "<short title>"' >&2
+    return 1
+  fi
+
+  data="$(data_dir)"
+  inbox="$data/inbox"
+  done_in=""
+
+  # The app's own inbox first, if it exists or can be made here.
+  if [ -d "$data" ] && [ -w "$data" ]; then
+    [ -d "$inbox" ] || mkdir -p "$inbox" 2>/dev/null
+    if queue_into "$inbox" "$title"; then done_in="inbox"; fi
+  fi
+
+  # Sandboxed agents (Codex's default) can't write into Application Support; their TMPDIR is writable.
+  if [ -z "$done_in" ]; then
+    spool="$(tmp_root)/monotask-inbox"
+    if [ ! -d "$spool" ]; then
+      (umask 077 && mkdir -p "$spool") 2>/dev/null
+    fi
+    if [ -d "$spool" ] && [ -O "$spool" ] && queue_into "$spool" "$title"; then
+      done_in="spool"
+    fi
+  fi
+
+  if [ -z "$done_in" ]; then
+    echo "monotask: couldn't queue the item (no writable inbox folder)." >&2
+    return 1
+  fi
+
+  if [ ! -d "$data" ]; then
+    echo "Queued for the user's Do Next: $title (Monotask isn't set up on this machine yet; it will appear when Monotask runs)."
+  else
+    echo "Added to the user's Do Next: $title"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------------------------- hook
+
+# Value of the first string field named "$1" in the JSON on stdin (one line or pretty-printed).
+json_str() {
+  awk -v key="$1" '
+    { s = s $0 " " }
+    END {
+      k = "\"" key "\""
+      i = index(s, k)
+      if (!i) exit
+      r = substr(s, i + length(k))
+      if (!match(r, /^[ \t]*:[ \t]*"/)) exit
+      r = substr(r, RLENGTH + 1)
+      j = index(r, "\"")
+      if (j) r = substr(r, 1, j - 1)
+      print r
+    }'
+}
+
+sanitize_id() {
+  tr -cd 'A-Za-z0-9._-' | sed 's/^\.*//' | cut -c1-128
+}
+
+CTX_BODY=""      # current context text, "" when there is no Do Now
+CTX_DIGEST="none"
+
+load_context() {
+  f="$(data_dir)/$CONTEXT_NAME"
+  CTX_BODY=""
+  CTX_DIGEST="none"
+  if [ -s "$f" ] && [ -r "$f" ]; then
+    CTX_BODY="$(head -c "$MAX_CONTEXT_BYTES" "$f" 2>/dev/null)"
+    if [ -n "$CTX_BODY" ]; then
+      CTX_DIGEST="$(printf '%s' "$CTX_BODY" | cksum | tr ' ' '-')"
+    fi
+  fi
+}
+
+print_context() {
+  printf '%s\n' "$CTX_BODY"
+  if [ -n "${CLAUDECODE:-}" ]; then
+    cmd="monotask"
+  else
+    cmd="\"$(self_path)\""
+  fi
+  printf '%s\n' "Command that adds an item to the user's Do Next (they agree first): $cmd add \"<short title>\""
+}
+
+EMPTY_NOTICE="Monotask update: the user's Do Now is empty now, so the earlier task is no longer in progress."
+
+hook_host() {
+  if [ -n "${CLAUDECODE:-}" ]; then echo claude; else echo codex; fi
+}
+
+cmd_hook() {
+  event="${1:-}"
+  exec 2>/dev/null
+
+  data="$(data_dir)"
+  # Cloud sessions have no app: stay silent.
+  if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] && [ ! -d "$data" ]; then
+    return 0
+  fi
+
+  input=""
+  if [ ! -t 0 ]; then
+    input="$(head -c 262144 2>/dev/null)"
+  fi
+  sid="$(printf '%s' "$input" | json_str session_id | sanitize_id)"
+
+  state="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-$(tmp_root)/monotask-hooks}}/sessions"
+  agents="$data/agents"
+  host="$(hook_host)"
+
+  case "$event" in
+    session-start)
+      source_kind="$(printf '%s' "$input" | json_str source | tr -cd 'a-z')"
+      load_context
+      prev=""
+      if [ -n "$sid" ] && [ -f "$state/$sid" ]; then
+        prev="$(cat "$state/$sid" 2>/dev/null)"
+      fi
+      if [ "$CTX_DIGEST" != "none" ]; then
+        # A resumed conversation still has the text from last time; only repeat it when it changed.
+        if ! { [ "$source_kind" = "resume" ] && [ "$prev" = "$CTX_DIGEST" ]; }; then
+          print_context
+        fi
+      elif [ -n "$prev" ] && [ "$prev" != "none" ]; then
+        printf '%s\n' "$EMPTY_NOTICE"
+      fi
+      if [ -n "$sid" ]; then
+        remember "$state" "$sid" "$CTX_DIGEST"
+      fi
+      prune "$state" "$agents"
+      ;;
+
+    prompt-submit)
+      if [ -n "$sid" ]; then
+        load_context
+        prev="none"
+        if [ -f "$state/$sid" ]; then
+          prev="$(cat "$state/$sid" 2>/dev/null)"
+          [ -n "$prev" ] || prev="none"
+        fi
+        if [ "$CTX_DIGEST" != "$prev" ]; then
+          if [ "$CTX_DIGEST" = "none" ]; then
+            printf '%s\n' "$EMPTY_NOTICE"
+          else
+            printf '%s\n' "Monotask update:"
+            print_context
+          fi
+          remember "$state" "$sid" "$CTX_DIGEST"
+        fi
+        marker "$agents" "$sid" busy "$host"
+      fi
+      ;;
+
+    stop)
+      if [ -n "$sid" ]; then
+        marker "$agents" "$sid" idle "$host"
+      fi
+      ;;
+
+    session-end)
+      if [ -n "$sid" ]; then
+        rm -f "$agents/$sid" "$state/$sid" 2>/dev/null
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# Records which context a session was last told about.
+remember() {
+  mkdir -p "$1" 2>/dev/null || return 0
+  write_atomic "$1" "$3" "$2" || true
+}
+
+# Activity marker for the future "keep agents running with the lid closed" mode; skipped without a data folder.
+marker() {
+  [ -d "$(data_dir)" ] && [ -w "$(data_dir)" ] || return 0
+  mkdir -p "$1" 2>/dev/null || return 0
+  write_atomic "$1" "$3 $(date +%s) $4" "$2" || true
+}
+
+# Drops state and markers nobody has touched for a week (sessions that never reached session-end).
+prune() {
+  for d in "$1" "$2"; do
+    [ -d "$d" ] && find "$d" -type f -mtime +"$STALE_DAYS" -exec rm -f {} + 2>/dev/null
+  done
+  return 0
+}
+
+# ---------------------------------------------------------------------------------------------- main
+
+case "${1:-}" in
+  now) cmd_now; exit $? ;;
+  add) shift; cmd_add "$@"; exit $? ;;
+  hook) shift; cmd_hook "$@"; exit 0 ;;
+  --version|-v|version) echo "monotask $VERSION"; exit 0 ;;
+  help|-h|--help|"") usage; exit 0 ;;
+  *) echo "monotask: unknown command '$1'" >&2; usage >&2; exit 2 ;;
+esac
