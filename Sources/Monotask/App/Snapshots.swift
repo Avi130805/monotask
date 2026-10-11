@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// `Monotask --snapshot <folder>` renders the main notch states, the prompter, the Insights window and the script
-/// editor, with demo data, to PNGs. Windows are parked off-screen, so it needs no screen recording permission and
+/// `Monotask --snapshot <folder>` renders the main notch states, the prompter, the Insights window, the script editor
+/// and the Lid-Closed Mode window, with demo data, to PNGs. Windows are parked off-screen, so it needs no screen recording permission and
 /// never touches your real list or script.
 @MainActor
 enum Snapshots {
@@ -41,7 +41,13 @@ enum Snapshots {
         let (editor, editorWindow) = host(ScriptEditor(draft: ScriptDraft(text: prompter.text), prompter: prompter,
                                                        onSave: {}, onStart: {}),
                                           size: CGSize(width: 680, height: 640))
-        let windows = [notchWindow, insightsWindow, pageWindow, editorWindow]
+        // Lid-Closed Mode, posed: its settings live in a throwaway defaults suite, and no sensor or helper is touched.
+        let lidSuite = "monotask-snapshot-lid-\(UUID().uuidString)"
+        let lidDefaults = UserDefaults(suiteName: lidSuite) ?? .standard
+        let lid = LidController(dataFolder: scratch, defaults: lidDefaults, interactive: false)
+        let (lidPane, lidWindow) = host(LidSettingsView(controller: lid).defaultAppStorage(lidDefaults),
+                                        size: CGSize(width: 560, height: 1_000))
+        let windows = [notchWindow, insightsWindow, pageWindow, editorWindow, lidWindow]
         // The first word starting with `text`; a word can carry its punctuation or a dash ("genie —").
         func word(_ text: String) -> (PromptScript.Step) -> Bool { { $0.kind == .word && $0.text.hasPrefix(text) } }
 
@@ -81,12 +87,30 @@ enum Snapshots {
             ("21-insights-dark", page, { pageWindow.appearance = NSAppearance(named: .darkAqua) }),
             ("22-insights-light", page, { pageWindow.appearance = NSAppearance(named: .aqua) }),
             ("39-prompter-script", editor, { editorWindow.appearance = NSAppearance(named: .darkAqua) }),
+            ("40-lid-off", lidPane, {
+                lidWindow.appearance = NSAppearance(named: .aqua)
+                lid.pose(reason: .off, helper: .missing)
+            }),
+            ("41-lid-ready", lidPane, {
+                lidDefaults.set(true, forKey: Prefs.lidEnabled)
+                lid.pose(reason: .idle, helper: .running)
+            }),
+            ("42-lid-awake-working", lidPane, { lid.pose(reason: .working(2), helper: .running, working: 2, awakeFor: 42 * 60) }),
+            ("43-lid-heat-cutout", lidPane, { lid.pose(reason: .hot, helper: .running, working: 2) }),
+            ("44-lid-network-trying", lidPane, {
+                lidDefaults.set(true, forKey: Prefs.lidFailover)
+                lid.pose(reason: .working(1), helper: .running, working: 1, awakeFor: 65 * 60,
+                         network: "No internet · trying Studio Wi-Fi (2 of 6 this hour)",
+                         fallbacks: ["Studio Wi-Fi", "Avi's iPhone"])
+            }),
+            ("45-lid-network-dark", lidPane, { lidWindow.appearance = NSAppearance(named: .darkAqua) }),
         ]
 
         var index = 0
         func step() {
             guard index < steps.count else {
                 try? files.removeItem(at: scratch)
+                lidDefaults.removePersistentDomain(forName: lidSuite)
                 print("Wrote \(steps.count) snapshots to \(folder.path)")
                 windows.forEach { $0.close() }
                 NSApp.terminate(nil)

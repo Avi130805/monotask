@@ -3,7 +3,8 @@
 #
 #   monotask now                 print the user's current Do Now (what the app wrote to agent-context.md)
 #   monotask add "<title>"       queue an item for the user's Do Next
-#   monotask hook <event>        host hook entry point (session-start | prompt-submit | stop | session-end)
+#   monotask hook <event>        host hook entry point
+#                                (session-start | prompt-submit | pre-tool | post-tool | stop | session-end)
 #   monotask --version | help
 #
 # Information only flows into agents: nothing here starts, changes or finishes the Do Now.
@@ -238,6 +239,13 @@ cmd_hook() {
     return 0
   fi
 
+  case "$event" in
+    pre-tool|post-tool)
+      tool_marker "$event" "$data/agents"
+      return 0
+      ;;
+  esac
+
   input=""
   if [ ! -t 0 ]; then
     input="$(head -c 262144 2>/dev/null)"
@@ -315,11 +323,27 @@ remember() {
   write_atomic "$1" "$3" "$2" || true
 }
 
-# Activity marker for the future "keep agents running with the lid closed" mode; skipped without a data folder.
+# Activity marker for lid-closed mode ("keep agents running with the lid closed"); skipped without a data folder.
+#   busy <epoch> <host>   a prompt was submitted, or a tool just finished: the agent is thinking
+#   tool <epoch> <host>   a tool is running (a long build or test run fires nothing until it ends)
+#   idle <epoch> <host>   the agent finished its turn
 marker() {
   [ -d "$(data_dir)" ] && [ -w "$(data_dir)" ] || return 0
   mkdir -p "$1" 2>/dev/null || return 0
   write_atomic "$1" "$3 $(date +%s) $4" "$2" || true
+}
+
+# PreToolUse and PostToolUse fire around every tool call, so they do the least they can: the session id is at the
+# start of the input, and the rest (a tool's arguments or output, possibly large) is drained unread.
+tool_marker() {
+  sid=""
+  if [ ! -t 0 ]; then
+    sid="$(head -c 16384 2>/dev/null | json_str session_id | sanitize_id)"
+    cat >/dev/null 2>&1
+  fi
+  [ -n "$sid" ] || return 0
+  if [ "$1" = "pre-tool" ]; then kind=tool; else kind=busy; fi
+  marker "$2" "$sid" "$kind" "$(hook_host)"
 }
 
 # Drops state and markers nobody has touched for a week (sessions that never reached session-end).

@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentInbox: AgentInbox?
     private var hotKey: HotKey?
     private var prompterHotKey: HotKey?
+    private var lid: LidController?
+    private var lidWindow: LidWindow?
 
     private static let openRequest = Notification.Name("io.github.avi130805.Monotask.open")
 
@@ -49,6 +51,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         notch.model.prompterHotKeyLabel = prompterHotKey?.label ?? ""
 
+        // Lid-closed mode: off unless switched on in its window, opened from the ••• menu. The lease sits beside the list,
+        // so a test run's lease is throwaway, and a test run never shows its alerts or installs anything.
+        let lid = LidController(dataFolder: store.folder, interactive: file == nil)
+        self.lid = lid
+        lid.start()
+        NotificationCenter.default.addObserver(forName: .openLidWindow, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showLidWindow() }
+        }
+
         // Real runs only; a test run (MONOTASK_STATE_FILE) must never pop a dialog. Once per launch, after the notch is up.
         if file == nil { DispatchQueue.main.async { [weak self] in self?.warnIfNextIsRunning() } }
 
@@ -61,6 +72,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store?.saveNow()
         // After the final save: agents shouldn't hear about a task while Monotask isn't running.
         agentBridge?.stop()
+        // Deleting the lease lets the helper turn sleep back on within seconds.
+        lid?.stop()
+    }
+
+    private func showLidWindow() {
+        guard let lid else { return }
+        let window = lidWindow ?? LidWindow(controller: lid)
+        lidWindow = window
+        window.show()
     }
 
     /// Next and Monotask both want the notch. If the old app is still running after the upgrade, say so once and

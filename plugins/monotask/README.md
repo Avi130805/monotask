@@ -4,7 +4,7 @@ Monotask holds exactly one task, your Do Now, with a finish line that says what 
 
 - The agent is told your Do Now and its finish line when a session starts, and again whenever you change it. It never has to ask.
 - With your yes, it can park side work on your Do Next. It shows up in the notch as the usual "Added to Do Next".
-- It reports when it is working (a small marker file), for a future mode that keeps agents running with the lid closed.
+- It reports when it is working (a small marker file). Monotask's optional lid-closed mode uses it to keep your Mac awake only while an agent works.
 - Information only flows into the agent. Agents never start, change or finish your Do Now. Only you do, in Monotask.
 
 Requires the Monotask app on macOS. Without it the plugin stays quiet.
@@ -29,7 +29,7 @@ codex plugin marketplace add Avi130805/monotask
 codex plugin add monotask@monotask
 ```
 
-Then trust the hooks once: start `codex` in a terminal, run `/hooks`, and approve the four Monotask hooks (SessionStart, UserPromptSubmit, Stop, SessionEnd). Codex asks again only if the hook commands change.
+Then trust the hooks once: start `codex` in a terminal, run `/hooks`, and approve the six Monotask hooks (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, SessionEnd). Codex asks again only if the hook commands change. If you approved the first four with an earlier version, only the two tool hooks are new.
 
 Hook support in the Codex desktop app depends on its version. If your app version does not run plugin hooks, the plugin's skill and the command still work, but the task is not injected automatically. Use the terminal CLI for the full behavior.
 
@@ -76,7 +76,15 @@ Items are queued as small `.txt` files in `inbox/` in Monotask's data folder. If
 
 Your Do Now title and finish line are sent to your agent's model provider (Anthropic for Claude Code, OpenAI for Codex), the same as anything else in a prompt. Nothing else from Monotask is: not your Do Next list, your log or your insights. The plugin makes no network requests. It writes only to Monotask's data folder (`inbox/`, `agents/`), the plugin's own data folder, and the temp folder.
 
-The activity markers are in `agents/` in the data folder: one file per live agent session containing `busy <epoch-seconds> <claude|codex>` or `idle ...`, removed when the session ends. Markers left behind by crashed sessions are pruned after a week.
+The activity markers are in `agents/` in the data folder: one file per live agent session containing one line, removed when the session ends. Markers left behind by crashed sessions are pruned after a week.
+
+| Line | Written when |
+| --- | --- |
+| `busy <epoch-seconds> <claude\|codex>` | you send a prompt (UserPromptSubmit), and after each tool call (PostToolUse) |
+| `tool <epoch-seconds> <claude\|codex>` | a tool starts (PreToolUse). A long build or test run fires nothing else until it ends. |
+| `idle <epoch-seconds> <claude\|codex>` | the agent finishes its turn (Stop) |
+
+The tool hooks fire around every tool call, so they only read the session id from the start of their input, never the tool's arguments or output, and take a few milliseconds. Monotask counts a session as working while its marker says `busy` and is under 10 minutes old, or `tool` and under an hour old. Claude Code fires no Stop when you interrupt with Esc, so an interrupted session counts as working until those times run out (or until no `claude` or `codex` process is left).
 
 ## Uninstall
 
