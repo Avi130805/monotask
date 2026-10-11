@@ -197,7 +197,21 @@ struct LidStatusRow: View {
                     Button(action.title, action: action.run)
                 }
             }
+            if let note {
+                Text(note)
+                    .font(Typeface.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 26)
+            }
         }
+    }
+
+    /// What the running helper says, in plain words, when it matters: its 8-hour limit, an error, a setting it didn't make.
+    private var note: String? {
+        guard controller.work == nil, !controller.settingStuck, enabled, controller.helperState == .running,
+              let reason = controller.helperReason else { return nil }
+        return LidController.helperNote(reason: reason)
     }
 
     private var problem: Bool {
@@ -207,7 +221,7 @@ struct LidStatusRow: View {
     private var text: String {
         if controller.work == .installing { return "Installing the helper…" }
         if controller.work == .removing { return "Removing the helper…" }
-        if controller.settingStuck { return "Your Mac is set to never sleep, and the helper isn't running to undo it." }
+        if controller.settingStuck { return controller.stuckText }
         guard enabled else { return LidReason.off.text }
         if controller.startingSince != nil && controller.helperState != .running { return "Starting the helper…" }
         switch controller.helperState {

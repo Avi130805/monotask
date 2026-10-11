@@ -1727,6 +1727,7 @@ extension SelfTest {
         var installed = LidHelper.Installed.current
         var statusAge: TimeInterval = 2
         var statusAlive = true
+        var statusReason = "idle"
         var sleepDisabled: Bool? = false
         var owned = false
         var machine = LidMachine()
@@ -1738,7 +1739,7 @@ extension SelfTest {
         machine.sleepDisabled = { sleepDisabled }
         machine.helperInstalled = { installed }
         machine.helperStatus = {
-            LidHelper.Status(alive: statusAlive, at: clock.addingTimeInterval(-statusAge), sleepDisabled: false, owned: false, reason: "idle")
+            LidHelper.Status(alive: statusAlive, at: clock.addingTimeInterval(-statusAge), sleepDisabled: false, owned: false, reason: statusReason)
         }
         machine.ownedMarkerExists = { owned }
 
@@ -1863,12 +1864,22 @@ extension SelfTest {
         defaults.set(false, forKey: Prefs.lidFailover)
 
         // A sleep setting left behind.
-        check(LidController.settingIsStuck(sleepDisabled: true, owned: true, helperFresh: false)
-              && !LidController.settingIsStuck(sleepDisabled: true, owned: false, helperFresh: false)
-              && !LidController.settingIsStuck(sleepDisabled: true, owned: true, helperFresh: true)
-              && !LidController.settingIsStuck(sleepDisabled: false, owned: true, helperFresh: false)
-              && !LidController.settingIsStuck(sleepDisabled: nil, owned: true, helperFresh: false),
-              "it warns only when sleep is off, Monotask's helper did it, and the helper isn't running to undo it")
+        check(LidController.settingIsStuck(sleepDisabled: true, owned: true, helperAlive: false, noLeaseFor: nil)
+              && !LidController.settingIsStuck(sleepDisabled: true, owned: false, helperAlive: false, noLeaseFor: 99)
+              && !LidController.settingIsStuck(sleepDisabled: true, owned: true, helperAlive: true, noLeaseFor: nil)
+              && !LidController.settingIsStuck(sleepDisabled: true, owned: true, helperAlive: true, noLeaseFor: 10)
+              && LidController.settingIsStuck(sleepDisabled: true, owned: true, helperAlive: true, noLeaseFor: 31)
+              && !LidController.settingIsStuck(sleepDisabled: false, owned: true, helperAlive: false, noLeaseFor: 99)
+              && !LidController.settingIsStuck(sleepDisabled: nil, owned: true, helperAlive: false, noLeaseFor: 99),
+              "it warns only when sleep is off, Monotask's helper did it, and the helper isn't running or hasn't undone it 30 s after the lease went")
+        check(LidController.helperNote(reason: "cap") != nil && LidController.helperNote(reason: "error") != nil
+              && LidController.helperNote(reason: "foreign") != nil && LidController.helperNote(reason: "lease") == nil
+              && LidController.helperNote(reason: "idle") == nil,
+              "the helper's cap, error and foreign reasons get a plain sentence; routine ones don't")
+        check(LidController.stuckText(helperAlive: true, reason: "error").contains("couldn't turn sleep back on")
+              && LidController.stuckText(helperAlive: true, reason: "cap").contains("8-hour limit")
+              && LidController.stuckText(helperAlive: false, reason: nil).contains("isn't running"),
+              "a stuck setting says why in plain words")
         sleepDisabled = true
         owned = true
         installed = .missing
@@ -1881,6 +1892,27 @@ extension SelfTest {
         installed = .current
         controller.evaluate(activity: one)
         check(!controller.settingStuck, "once sleep is back on, the warning goes")
+
+        // The helper running, but failing to turn sleep back on.
+        defaults.set(false, forKey: Prefs.lidEnabled)
+        sleepDisabled = true
+        owned = true
+        statusReason = "error"
+        controller.evaluate(activity: one)
+        clock += 20
+        controller.evaluate(activity: one)
+        check(!controller.settingStuck, "a helper that's running gets a moment to turn sleep back on")
+        clock += 15
+        controller.evaluate(activity: one)
+        check(controller.settingStuck && controller.decision.reason == .off && controller.helperReason == "error"
+              && controller.stuckText.contains("couldn't turn sleep back on"),
+              "sleep still off, with Monotask's marker, 30 s after the app let go of its lease: stuck, even with the helper running")
+        sleepDisabled = false
+        owned = false
+        statusReason = "idle"
+        controller.evaluate(activity: one)
+        check(!controller.settingStuck, "and it clears once sleep is back on")
+        defaults.set(true, forKey: Prefs.lidEnabled)
 
         // Fallback networks.
         check(controller.addFallback(name: "  Studio Wi-Fi ", password: "hunter22") && controller.fallbacks == ["Studio Wi-Fi"]

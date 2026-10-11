@@ -45,8 +45,13 @@ final class LidController {
     private(set) var fallbacks: [String] = []
     /// Set right after installing, while the helper starts.
     private(set) var startingSince: Date?
-    /// Sleep is off because of Monotask's helper, and the helper isn't running to turn it back on.
+    /// Sleep is off because of Monotask's helper, and it isn't being turned back on: the helper isn't running, or it
+    /// is and keeps failing.
     private(set) var settingStuck = false
+    /// What the running helper last said about itself, when it's worth a word: "cap", "error" or "foreign".
+    private(set) var helperReason: String?
+    /// The helper (any version) is installed and checked in lately.
+    private(set) var helperAlive = false
 
     @ObservationIgnored let leaseURL: URL
     @ObservationIgnored private let agentsFolder: URL
@@ -64,6 +69,9 @@ final class LidController {
     @ObservationIgnored private var lastWorking: Date?
     @ObservationIgnored private var closedAwakeSince: Date?
     @ObservationIgnored private var leaseExpiry: Date?
+    /// Since when the app has held no lease (nil while it holds one). The helper should turn sleep back on within
+    /// seconds of the lease going.
+    @ObservationIgnored private var leaseReleasedAt: Date?
     @ObservationIgnored private var activity = AgentActivity.Summary()
     @ObservationIgnored private var scanning = false
     /// The last look at the agents' child processes, for telling a long build from a permission prompt.
@@ -92,6 +100,7 @@ final class LidController {
         self.prober = prober
         self.wifi = wifi
         self.passwords = passwords
+        leaseReleasedAt = machine.now()
         failover = Failover(ledger: FailoverLedger.load(defaults))
         fallbacks = (defaults.stringArray(forKey: Prefs.lidFallbackNetworks) ?? []).filter { !$0.isEmpty }
         failover.fallbacks = fallbacks
@@ -233,7 +242,9 @@ final class LidController {
         }
         if state != helperState { helperState = state }
         if startingSince != nil, fresh || (startingSince.map { now.timeIntervalSince($0) > 30 } ?? false) { startingSince = nil }
-        checkForStuckSetting(now: now, helperFresh: alive)
+        let reason = alive ? status.flatMap { LidController.helperNote(reason: $0.reason) == nil ? nil : $0.reason } : nil
+        if reason != helperReason { helperReason = reason }
+        checkForStuckSetting(now: now, helperAlive: alive)
 
         guard settings.enabled else {
             latch = nil
@@ -311,14 +322,17 @@ final class LidController {
             try Data(LidHelper.leaseText(expiry: expiry).utf8).write(to: leaseURL, options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: leaseURL.path)
             leaseExpiry = expiry
+            leaseReleasedAt = nil
         } catch {
             NSLog("Monotask: couldn't write the lid lease: \(error.localizedDescription)")
             leaseExpiry = nil
+            leaseReleasedAt = leaseReleasedAt ?? now
         }
     }
 
     private func removeLease() {
         leaseExpiry = nil
+        leaseReleasedAt = leaseReleasedAt ?? machine.now()
         let files = FileManager.default
         guard (try? files.attributesOfItem(atPath: leaseURL.path)) != nil else { return }
         do { try files.removeItem(at: leaseURL) } catch {
@@ -397,13 +411,43 @@ final class LidController {
 
     // MARK: A setting left behind
 
-    /// Sleep is off, Monotask's helper turned it off, and the helper isn't running to turn it back on.
-    static func settingIsStuck(sleepDisabled: Bool?, owned: Bool, helperFresh: Bool) -> Bool {
-        sleepDisabled == true && owned && !helperFresh
+    /// How long the helper gets to turn sleep back on after the lease goes before it counts as failing.
+    static let restoreGrace: TimeInterval = 30
+
+    /// Sleep is off and Monotask's helper turned it off, and either the helper isn't running to turn it back on, or it
+    /// is but sleep is still off half a minute after the app let go of its lease (nil: it holds one).
+    static func settingIsStuck(sleepDisabled: Bool?, owned: Bool, helperAlive: Bool, noLeaseFor: TimeInterval?) -> Bool {
+        guard sleepDisabled == true, owned else { return false }
+        return !helperAlive || (noLeaseFor.map { $0 > restoreGrace } ?? false)
     }
 
-    private func checkForStuckSetting(now: Date, helperFresh: Bool) {
-        let stuck = Self.settingIsStuck(sleepDisabled: machine.sleepDisabled(), owned: machine.ownedMarkerExists(), helperFresh: helperFresh)
+    /// The helper's status reasons worth telling the user about, in plain words.
+    static func helperNote(reason: String) -> String? {
+        switch reason {
+        case "cap": return "The helper stopped at its 8-hour limit. Agents can keep your Mac awake again after a 10-minute break."
+        case "error": return "The helper couldn't change the sleep setting."
+        case "foreign": return "Something else turned sleep off, so the helper leaves it alone."
+        default: return nil
+        }
+    }
+
+    /// The status line for a stuck setting.
+    static func stuckText(helperAlive: Bool, reason: String?) -> String {
+        guard helperAlive else { return "Your Mac is set to never sleep, and the helper isn't running to undo it." }
+        switch reason {
+        case "cap": return "Your Mac is set to never sleep: the helper reached its 8-hour limit but couldn't turn sleep back on."
+        case "foreign": return "Your Mac is set to never sleep: the helper sees a setting it didn't make and won't touch it."
+        default: return "Your Mac is set to never sleep: the helper is running but couldn't turn sleep back on."
+        }
+    }
+
+    /// The window's line when the setting is stuck.
+    var stuckText: String { Self.stuckText(helperAlive: helperAlive, reason: helperReason) }
+
+    private func checkForStuckSetting(now: Date, helperAlive: Bool) {
+        if helperAlive != self.helperAlive { self.helperAlive = helperAlive }
+        let stuck = Self.settingIsStuck(sleepDisabled: machine.sleepDisabled(), owned: machine.ownedMarkerExists(), helperAlive: helperAlive,
+                                        noLeaseFor: leaseReleasedAt.map { now.timeIntervalSince($0) })
         if stuck != settingStuck { settingStuck = stuck }
         guard stuck else {
             stuckSince = nil
@@ -422,7 +466,8 @@ final class LidController {
         NSApp.activate()
         let alert = NSAlert()
         alert.messageText = "Your Mac is set to never sleep"
-        alert.informativeText = "Lid-closed mode turned sleep off, and its helper isn't running to turn it back on. Your Mac won't sleep, even with the lid closed, until it's fixed. Let It Sleep removes the helper and turns sleep back on; it asks for your password."
+        let why = helperAlive ? "its helper is running but couldn't turn it back on" : "its helper isn't running to turn it back on"
+        alert.informativeText = "Lid-closed mode turned sleep off, and \(why). Your Mac won't sleep, even with the lid closed, until it's fixed. Let It Sleep removes the helper and turns sleep back on; it asks for your password."
         alert.addButton(withTitle: "Let It Sleep")
         alert.addButton(withTitle: "Not Now")
         if alert.runModal() == .alertFirstButtonReturn {
