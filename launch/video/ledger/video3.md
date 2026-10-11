@@ -96,7 +96,7 @@ poster at 60.380 s; gif 41.647..49.247
 ### 5. Proof
 1. `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,profile,width,height,r_frame_rate,pix_fmt -show_entries format=duration,size -of default=nw=1 <mp4>` | exit 0
 ```
-== out/monotask-guide.mp4
+== out/monotask-guide.mp4 (output lines joined with spaces)
 codec_name=h264 profile=High width=1920 height=1080 pix_fmt=yuv420p r_frame_rate=30/1 duration=70.666667 size=6837967
 == out/monotask-short.mp4
 codec_name=h264 profile=High width=1920 height=1080 pix_fmt=yuv420p r_frame_rate=30/1 duration=30.100000 size=4869842
@@ -115,3 +115,38 @@ codec_name=h264 profile=High width=1920 height=1080 pix_fmt=yuv420p r_frame_rate
 - The terminal now appears 0.83 s later in the guide (25.83 s) and 0.33 s later in the short (3.33 s). The session itself starts at the same time as before. This is the only timing change, and it was needed so that no row is cut or covered while the camera pulls back from the notch close-up.
 - The check frames for beats 6–8 changed in bytes only. That is from the re-encode; the content is the same, and the poster is byte-identical.
 - Carried over: em dashes and the "commit this" suggestion inside Claude Code's real UI. They can't be changed without editing the recording.
+
+## CLOSE
+
+| command | verdict | exit |
+|---|---|---|
+| `bash launch/video/setup.sh` | setup: ok | 0 |
+| `node launch/video/work/check-layout.mjs guide 3` (before fix) | layout: FAIL (123): rows cut by frame edge, caption covers terminal text | 1 |
+| `node launch/video/work/check-layout.mjs short 3` (before fix) | layout: FAIL (70) | 1 |
+| `node launch/video/work/check-layout.mjs guide 3` / `short 3` (after fix) | layout: PASS / layout: PASS | 0 |
+| `node launch/video/work/check-layout.mjs guide 1 25-52` / `short 1 2.5-19` (every terminal frame) | layout: PASS / layout: PASS | 0 |
+| `node work/render.mjs guide ../out/monotask-guide.mp4` | 1920×1080, 30 fps, H.264 High, yuv420p, 70.67 s, 6.8 MB | 0 |
+| `node work/render.mjs short ../out/monotask-short.mp4` | 1920×1080, 30 fps, H.264 High, yuv420p, 30.10 s, 4.9 MB | 0 |
+| `bash work/finish.sh` | poster 1920×1080; GIF 960 px, 15 fps, 7.0 s, 4.1 MB | 0 |
+| proof 1–5 | PASS | 0 |
+
+Files changed (`git diff --stat origin/work/main...HEAD`, before this CLOSE block was added):
+```
+ launch/video/ledger/video3.md                | 117 +++++++++++++++++++++++++++
+ launch/video/out/BEATS.md                    |   6 +-
+ launch/video/out/check/guide-beat5-37.5s.png | Bin 590912 -> 581012 bytes
+ launch/video/out/check/guide-beat6-52.3s.png | Bin 241941 -> 232875 bytes
+ launch/video/out/check/guide-beat7-59.0s.png | Bin 367438 -> 363752 bytes
+ launch/video/out/check/guide-beat8-67.0s.png | Bin 287377 -> 280953 bytes
+ launch/video/out/monotask-guide.mp4          | Bin 7637053 -> 6837967 bytes
+ launch/video/out/monotask-short.mp4          | Bin 5773830 -> 4869842 bytes
+ launch/video/out/readme.gif                  | Bin 4170501 -> 4063759 bytes
+ launch/video/work/check-layout.mjs           |  46 ++++++++++-
+ launch/video/work/film/film.js               |  61 +++++++++++---
+ 11 files changed, 215 insertions(+), 15 deletions(-)
+```
+Everything is under `launch/video/`.
+
+OPEN: R2 (Codex) still not recorded, so the card is kept. The push-in is gentler (1.235× / 1.275×) and the notch is out of frame during it. The terminal fades in 0.83 s later (guide) and 0.33 s later (short), while the session timing is unchanged. The em dashes and prompt suggestion inside the real Claude Code UI carry over.
+
+CLOSE: video3
