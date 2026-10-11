@@ -10,24 +10,28 @@ struct HoldToFinishButton: View {
 
     private let duration: Double = 1.1
 
+    /// A snapshot can pose the button; otherwise it follows the press.
+    private var shownProgress: CGFloat { model.posedHold?.progress ?? progress }
+    private var shownCompleted: Bool { model.posedHold?.completed ?? completed }
+
     var body: some View {
         ZStack {
             Capsule().fill(Color.white.opacity(0.09))
             GeometryReader { geometry in
                 Capsule()
-                    .fill(completed ? Palette.done : Palette.accent.opacity(0.45))
-                    .frame(width: max(geometry.size.height, geometry.size.width * progress))
-                    .opacity(progress > 0.001 || completed ? 1 : 0)
+                    .fill(shownCompleted ? Palette.done : Palette.accent.opacity(0.45))
+                    .frame(width: max(geometry.size.height, geometry.size.width * shownProgress))
+                    .opacity(shownProgress > 0.001 || shownCompleted ? 1 : 0)
             }
             HStack(spacing: 6) {
-                Image(systemName: completed ? "checkmark" : "checkmark.circle")
+                Image(systemName: shownCompleted ? "checkmark" : "checkmark.circle")
                     .font(.system(size: 12, weight: .bold))
                     .contentTransition(.symbolEffect(.replace))
                 Text(label)
                     .contentTransition(.interpolate)
             }
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(completed ? Color.black : Palette.primary)
+            .foregroundStyle(shownCompleted ? Color.black : Palette.primary)
         }
         .frame(height: 34)
         .contentShape(Capsule())
@@ -43,7 +47,8 @@ struct HoldToFinishButton: View {
     }
 
     private var label: String {
-        if completed { return "Done" }
+        if shownCompleted { return "Done" }
+        if let posed = model.posedHold { return posed.progress > 0 ? "Keep holding…" : "Hold to mark done" }
         return pressedAt == nil ? "Hold to mark done" : "Keep holding…"
     }
 

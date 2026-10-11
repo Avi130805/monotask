@@ -393,3 +393,15 @@ final class NotchController {
         }
     }
 }
+
+// MARK: Agents
+
+extension NotchController {
+    /// An item arrived in Do Next from a coding agent. A closed notch shows the same green flash as a capture;
+    /// an open panel just updates live, so it stays quiet.
+    func announceAdded(position: Int) {
+        guard model.mode == .closed || model.mode == .peek else { return }
+        let place = position > Layout.visibleNext ? "Later" : "Do Next"
+        flash(Flash(symbol: "checkmark", text: "Added to \(place)", tint: Palette.done))
+    }
+}
