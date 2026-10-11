@@ -31,7 +31,7 @@ codex plugin add monotask@monotask
 
 Then trust the hooks once: start `codex` in a terminal, run `/hooks`, and approve the four Monotask hooks (SessionStart, UserPromptSubmit, Stop, SessionEnd). Codex asks again only if the hook commands change.
 
-Hook support in the Codex desktop app depends on its version. If your app version does not run plugin hooks, the plugin's skill and the `monotask` command still work, but the task is not injected automatically. Use the terminal CLI for the full behavior.
+Hook support in the Codex desktop app depends on its version. If your app version does not run plugin hooks, the plugin's skill and the command still work, but the task is not injected automatically. Use the terminal CLI for the full behavior.
 
 ## What the agent sees
 
@@ -51,6 +51,8 @@ How the user works with it:
 Command that adds an item to the user's Do Next (they agree first): monotask add "<short title>"
 ```
 
+The agent uses that exact command. In Claude Code it is plain `monotask` (the plugin puts `bin/` on the PATH). Codex does not, so there the line carries the quoted full path of the plugin's script instead, e.g. `"/path/to/plugins/monotask/bin/monotask" add "<short title>"`.
+
 When your Do Now is cleared, the agent's next prompt carries one line saying so. The text lives in `agent-context.md` in Monotask's data folder, written by the app. The plugin only reads it.
 
 ## Using it
@@ -58,9 +60,9 @@ When your Do Now is cleared, the agent's next prompt carries one line saying so.
 Nothing to do day to day. A few things you can say:
 
 - "What's my current task, and is it done?" The agent answers from your Do Now.
-- "Park that for later." The agent shows the title it would use, and once you agree runs `monotask add "<short title>"`. In Claude Code the permission prompt is your yes; in Codex, approve the command if asked.
+- "Park that for later." The agent shows the title it would use, and once you agree runs the command from its session context with `add "<short title>"`. In Claude Code the permission prompt is your yes; in Codex, approve the command if asked.
 
-The `monotask` command, also usable yourself in a terminal that has `plugins/monotask/bin` on the PATH:
+The command, also usable yourself in a terminal (put `plugins/monotask/bin` on your PATH, or use its full path):
 
 ```
 monotask now                 print the current Do Now, or "No task in Do Now."
@@ -68,7 +70,7 @@ monotask add "Fix flaky auth test"
 monotask --version
 ```
 
-Items are queued as small `.txt` files in `inbox/` in Monotask's data folder. If that folder is not writable (Codex's default sandbox blocks Application Support), they go to `$TMPDIR/monotask-inbox/`, which Monotask also watches.
+Items are queued as small `.txt` files in `inbox/` in Monotask's data folder. If that folder is not writable (Codex's default sandbox blocks Application Support), they go to `monotask-inbox/` in your per-user temporary folder (`getconf DARWIN_USER_TEMP_DIR`, the same folder Monotask reads, even when the agent's own `$TMPDIR` differs), which Monotask also watches. If neither can be written, `add` says so and exits 1; the agent then asks you to add the item yourself with ⌥Space. If Monotask isn't running, `add` says the item is queued and appears when Monotask runs.
 
 ## Privacy
 
@@ -88,7 +90,7 @@ codex plugin remove monotask@monotask
 codex plugin marketplace remove monotask
 ```
 
-(Run `codex plugin --help` if your Codex version names these differently.) Your Do Now, Do Next and log in Monotask are not touched.
+(Run `codex plugin --help` if your Codex version names these differently.) Your Do Now, Do Next and log in Monotask are not touched. Quitting Monotask removes `agent-context.md`, so agents aren't told about a task while the app isn't running; the app writes it again on its next launch.
 
 ## Tests
 

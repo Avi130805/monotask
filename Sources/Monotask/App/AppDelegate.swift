@@ -49,6 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         notch.model.prompterHotKeyLabel = prompterHotKey?.label ?? ""
 
+        // Real runs only; a test run (MONOTASK_STATE_FILE) must never pop a dialog. Once per launch, after the notch is up.
+        if file == nil { DispatchQueue.main.async { [weak self] in self?.warnIfNextIsRunning() } }
+
         DistributedNotificationCenter.default().addObserver(forName: Self.openRequest, object: nil, queue: .main) { [weak notch] _ in
             MainActor.assumeIsolated { notch?.open() }
         }
@@ -56,6 +59,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         store?.saveNow()
+        // After the final save: agents shouldn't hear about a task while Monotask isn't running.
+        agentBridge?.stop()
+    }
+
+    /// Next and Monotask both want the notch. If the old app is still running after the upgrade, say so once and
+    /// offer to quit it; nothing is closed without the user's say-so.
+    private func warnIfNextIsRunning() {
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: LegacyData.oldBundleID)
+        guard !running.isEmpty else { return }
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = "Next is still running"
+        alert.informativeText = "Monotask replaces Next and already has your list. Quit Next so they don't both use the notch. You can then delete Next and remove it from Login Items."
+        alert.addButton(withTitle: "Quit Next")
+        alert.addButton(withTitle: "Keep Both")
+        if alert.runModal() == .alertFirstButtonReturn {
+            running.forEach { $0.terminate() }
+        }
     }
 
     /// Opening Monotask while it's already running opens the notch of the running copy instead.

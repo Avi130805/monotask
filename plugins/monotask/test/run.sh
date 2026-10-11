@@ -1,7 +1,8 @@
 #!/bin/sh
 # Tests for bin/monotask. POSIX sh; runs on macOS and Linux against throwaway folders:
 #   sh plugins/monotask/test/run.sh
-# Never touches the real Monotask data folder: MONOTASK_HOME, TMPDIR and CLAUDE_PLUGIN_DATA are redirected.
+# Never touches the real Monotask data folder or spool: MONOTASK_HOME, MONOTASK_SPOOL, TMPDIR and CLAUDE_PLUGIN_DATA
+# are redirected, and pgrep/getconf are stubbed on PATH so results don't depend on the machine running the tests.
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN="$HERE/../bin/monotask"
@@ -12,6 +13,20 @@ mt() { if [ -n "${MT_SH:-}" ]; then "$MT_SH" "$BIN" "$@"; else "$BIN" "$@"; fi; 
 
 T="$(mktemp -d "${TMPDIR:-/tmp}/monotask-test.XXXXXX")" || exit 2
 trap 'chmod -R u+rwx "$T" 2>/dev/null; rm -rf "$T"' EXIT INT TERM
+
+# Stubs: pgrep answers MT_FAKE_PGREP (0 = Monotask is running, the default); getconf prints MT_FAKE_GETCONF.
+mkdir -p "$T/bin"
+cat >"$T/bin/pgrep" <<'STUB'
+#!/bin/sh
+exit "${MT_FAKE_PGREP:-0}"
+STUB
+cat >"$T/bin/getconf" <<'STUB'
+#!/bin/sh
+[ -n "${MT_FAKE_GETCONF:-}" ] && printf '%s\n' "$MT_FAKE_GETCONF"
+exit 0
+STUB
+chmod +x "$T/bin/pgrep" "$T/bin/getconf"
+PATH="$T/bin:$PATH"; export PATH
 
 PASSED=0
 FAILED=0
@@ -28,9 +43,9 @@ reset() {
   rm -rf "$T/home" "$T/tmp" "$T/plug"
   mkdir -p "$T/home" "$T/tmp" "$T/plug"
   cp "$FIXTURE" "$T/home/agent-context.md"
-  MONOTASK_HOME="$T/home"; TMPDIR="$T/tmp"; CLAUDE_PLUGIN_DATA="$T/plug"
-  export MONOTASK_HOME TMPDIR CLAUDE_PLUGIN_DATA
-  unset PLUGIN_DATA CLAUDE_CODE_REMOTE CLAUDECODE
+  MONOTASK_HOME="$T/home"; TMPDIR="$T/tmp"; CLAUDE_PLUGIN_DATA="$T/plug"; MONOTASK_SPOOL="$T/tmp/monotask-inbox"
+  export MONOTASK_HOME TMPDIR CLAUDE_PLUGIN_DATA MONOTASK_SPOOL
+  unset PLUGIN_DATA CLAUDE_CODE_REMOTE CLAUDECODE MT_FAKE_PGREP MT_FAKE_GETCONF
 }
 
 # hook <event> <stdin>: runs the hook, leaving stdout in $OUT and the exit status in $RC.
@@ -71,22 +86,34 @@ if [ "$OUT" = "No task in Do Now." ] && [ $RC -eq 0 ]; then pass "now without a 
 
 reset
 CLAUDECODE=1; export CLAUDECODE
+ABS="$(cd "$(dirname "$BIN")" && pwd -P)/monotask"
 hook session-start "$(start_json s1 startup)"
 WANT="${FIXTURE_TEXT}Command that adds an item to the user's Do Next (they agree first): monotask add \"<short title>\"
 "
 if [ "$OUT" = "$WANT" ] && [ $RC -eq 0 ]; then pass "session-start (Claude): fixture + bare monotask command"; else fail "session-start (Claude): fixture + bare monotask command" "$OUT"; fi
 
 reset
+CLAUDECODE=1; PLUGIN_DATA="$T/plug"; export CLAUDECODE PLUGIN_DATA
 hook session-start "$(start_json s1 startup)"
-ABS="$(cd "$(dirname "$BIN")" && pwd -P)/monotask"
 WANT="${FIXTURE_TEXT}Command that adds an item to the user's Do Next (they agree first): \"$ABS\" add \"<short title>\"
 "
-if [ "$OUT" = "$WANT" ] && [ $RC -eq 0 ]; then pass "session-start (Codex): fixture + quoted absolute path"; else fail "session-start (Codex): fixture + quoted absolute path" "$OUT"; fi
+if [ "$OUT" = "$WANT" ] && [ $RC -eq 0 ]; then pass "session-start (Codex, even with CLAUDECODE inherited): quoted absolute path"; else fail "session-start (Codex, even with CLAUDECODE inherited): quoted absolute path" "$OUT"; fi
 
 reset
 rm -f "$T/home/agent-context.md"
 hook session-start "$(start_json s1 startup)"
 if is_empty "$OUT" && [ $RC -eq 0 ]; then pass "session-start with no Do Now prints nothing"; else fail "session-start with no Do Now prints nothing" "$OUT"; fi
+
+# A resumed session with no record and no Do Now is told the earlier task is gone (it may still hold the old one).
+reset
+rm -f "$T/home/agent-context.md"
+hook session-start "$(start_json gone resume)"
+if [ "$OUT" = "$EMPTY_NOTICE
+" ] && [ $RC -eq 0 ]; then pass "resume with no record and no Do Now prints the exact empty notice"; else fail "resume with no record and no Do Now prints the exact empty notice" "$OUT"; fi
+hook session-start "$(start_json gone resume)"
+if is_empty "$OUT"; then pass "...and only once"; else fail "...and only once" "$OUT"; fi
+hook session-start "$(start_json fresh2 startup)"
+if is_empty "$OUT"; then pass "a plain startup with no Do Now still prints nothing"; else fail "a plain startup with no Do Now still prints nothing" "$OUT"; fi
 
 # ------------------------------------------------------------------------------------------ prompt-submit
 
@@ -232,8 +259,12 @@ if [ ! -e "$M" ] && [ ! -e "$T/plug/sessions/m1" ] && is_empty "$OUT"; then pass
 if [ "$(find "$T/home/agents" -name '.*' | wc -l | tr -d ' ')" = "0" ]; then pass "no dot-files left in agents/"; else fail "no dot-files left in agents/"; fi
 
 reset
+CLAUDECODE=1; PLUGIN_DATA="$T/plug"; export CLAUDECODE PLUGIN_DATA
 hook prompt-submit "$(prompt_json m2)" >/dev/null
-if grep -Eq '^busy [0-9]+ codex$' "$T/home/agents/m2" 2>/dev/null; then pass "marker host is codex without CLAUDECODE"; else fail "marker host is codex without CLAUDECODE"; fi
+if grep -Eq '^busy [0-9]+ codex$' "$T/home/agents/m2" 2>/dev/null; then pass "marker host is codex when PLUGIN_DATA is set, even with CLAUDECODE"; else fail "marker host is codex when PLUGIN_DATA is set, even with CLAUDECODE"; fi
+reset
+hook prompt-submit "$(prompt_json m4)" >/dev/null
+if grep -Eq '^busy [0-9]+ claude$' "$T/home/agents/m4" 2>/dev/null; then pass "marker host is claude without PLUGIN_DATA"; else fail "marker host is claude without PLUGIN_DATA"; fi
 
 reset
 MONOTASK_HOME="$T/no-such-home"; export MONOTASK_HOME
@@ -248,13 +279,17 @@ N="$(find "$T/home/inbox" -type f -name '*.txt' | wc -l | tr -d ' ')"
 F="$(find "$T/home/inbox" -type f -name '*.txt' | head -n 1)"
 if [ $RC -eq 0 ] && [ "$N" = "1" ] && [ "$(cat "$F")" = "Fix flaky auth test" ]; then pass "add writes exactly one .txt with the title into inbox/"; else fail "add writes exactly one .txt with the title into inbox/" "n=$N rc=$RC"; fi
 if [ "$(find "$T/home/inbox" -name '.*' | wc -l | tr -d ' ')" = "0" ]; then pass "add leaves no dot-files"; else fail "add leaves no dot-files"; fi
-if [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = "1" ] && contains "$OUT" "Do Next"; then pass "add prints one line mentioning Do Next"; else fail "add prints one line mentioning Do Next" "$OUT"; fi
+if [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = "1" ] && starts_with "$OUT" "Added to the user's Do Next"; then pass "add prints one line mentioning Do Next"; else fail "add prints one line mentioning Do Next" "$OUT"; fi
+MT_FAKE_PGREP=1; export MT_FAKE_PGREP
+OUT="$(mt add "While the app is closed")"
+if starts_with "$OUT" "Queued for the user's Do Next" && contains "$OUT" "appear when Monotask runs"; then pass "add says it is queued when the app isn't running"; else fail "add says it is queued when the app isn't running" "$OUT"; fi
+unset MT_FAKE_PGREP
 case "$(basename "$F")" in
   [0-9]*T[0-9]*Z-[0-9]*-[0-9a-f]*.txt) pass "file name is <timestamp>-<pid>-<random>.txt" ;;
   *) fail "file name is <timestamp>-<pid>-<random>.txt" "$(basename "$F")" ;;
 esac
 mt add "Second item" >/dev/null; mt add "Third item" >/dev/null
-if [ "$(find "$T/home/inbox" -name '*.txt' | wc -l | tr -d ' ')" = "3" ]; then pass "repeated adds never collide"; else fail "repeated adds never collide"; fi
+if [ "$(find "$T/home/inbox" -name '*.txt' | wc -l | tr -d ' ')" = "4" ]; then pass "repeated adds never collide"; else fail "repeated adds never collide"; fi
 if [ "$(find "$T/tmp/monotask-inbox" -type f 2>/dev/null | wc -l | tr -d ' ')" = "0" ]; then pass "spool unused while inbox/ works"; else fail "spool unused while inbox/ works"; fi
 
 # Unwritable inbox falls back to the spool.
@@ -278,11 +313,39 @@ fi
 # No data folder at all: queued in the spool, and says so.
 reset
 MONOTASK_HOME="$T/never-installed"; export MONOTASK_HOME
+MT_FAKE_PGREP=1; export MT_FAKE_PGREP   # the app is not running
 OUT="$(mt add "Early item")"; RC=$?
 if [ $RC -eq 0 ] && [ ! -e "$T/never-installed" ] && [ "$(find "$T/tmp/monotask-inbox" -name '*.txt' | wc -l | tr -d ' ')" = "1" ] && contains "$OUT" "Monotask runs"; then
   pass "without Monotask: queued in the spool, says it appears when Monotask runs"
 else
   fail "without Monotask: queued in the spool, says it appears when Monotask runs" "rc=$RC $OUT"
+fi
+
+# The spool is the per-user temp folder from getconf (what the app watches), not whatever TMPDIR the agent has.
+reset
+unset MONOTASK_SPOOL
+mkdir -p "$T/usertmp"
+MONOTASK_HOME="$T/never-installed"; MT_FAKE_GETCONF="$T/usertmp/"; export MONOTASK_HOME MT_FAKE_GETCONF
+TMPDIR="$T/other-tmp"; export TMPDIR; mkdir -p "$TMPDIR"
+OUT="$(mt add "Via getconf")"; RC=$?
+if [ $RC -eq 0 ] && [ "$(count_files "$T/usertmp/monotask-inbox")" = "1" ] && [ "$(count_files "$T/other-tmp")" = "0" ]; then
+  pass "spool is DARWIN_USER_TEMP_DIR/monotask-inbox, not \$TMPDIR"
+else
+  fail "spool is DARWIN_USER_TEMP_DIR/monotask-inbox, not \$TMPDIR" "rc=$RC $OUT"
+fi
+unset MT_FAKE_GETCONF
+OUT="$(mt add "No getconf answer")"; RC=$?
+if [ $RC -eq 0 ] && [ "$(count_files "$T/other-tmp/monotask-inbox")" = "1" ]; then pass "spool falls back to \$TMPDIR when getconf has no answer"; else fail "spool falls back to \$TMPDIR when getconf has no answer" "rc=$RC $OUT"; fi
+
+# Neither inbox nor spool usable: a clear message and exit 1.
+reset
+: >"$T/blocker"
+MONOTASK_HOME="$T/never-installed"; MONOTASK_SPOOL="$T/blocker/spool"; export MONOTASK_HOME MONOTASK_SPOOL
+OUT="$(mt add "Nowhere to go" 2>"$T/err")"; RC=$?
+if [ $RC -eq 1 ] && is_empty "$OUT" && grep -q "Couldn't reach Monotask from here; ask the user to add it with ⌥Space" "$T/err"; then
+  pass "add with nowhere to write: message on stderr, exit 1"
+else
+  fail "add with nowhere to write: message on stderr, exit 1" "rc=$RC out=$OUT err=$(cat "$T/err")"
 fi
 
 # Data folder exists but has no inbox yet: it is created.

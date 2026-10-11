@@ -16,11 +16,14 @@ final class AgentInbox {
     private let store: Store
     /// Called with the Do Next position of the last item added, after an import that added something.
     private let onAdded: (Int) -> Void
-    private var sources: [DispatchSourceFileSystemObject] = []
+    /// One watcher per folder, keyed by path, with the folder's inode when it was opened (see `ensureWatching`).
+    private var watchers: [String: Watcher] = [:]
+    private var started = false
     private var wakeObserver: NSObjectProtocol?
     private var pendingScan: DispatchWorkItem?
 
-    /// Where a sandboxed agent's script drops items: `$TMPDIR/monotask-inbox`.
+    /// Where a sandboxed agent's script drops items: `monotask-inbox` in the per-user temporary folder (the script
+    /// asks `getconf DARWIN_USER_TEMP_DIR`, which is the same folder as `NSTemporaryDirectory()`).
     nonisolated static var defaultSpool: URL {
         URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("monotask-inbox", isDirectory: true)
     }
@@ -34,18 +37,25 @@ final class AgentInbox {
 
     private var folders: [URL] { [folder] + (spool.map { [$0] } ?? []) }
 
+    private struct Watcher {
+        let source: DispatchSourceFileSystemObject
+        let inode: UInt64
+    }
+
     deinit {
-        sources.forEach { $0.cancel() }
+        watchers.values.forEach { $0.source.cancel() }
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
     }
 
-    /// Creates the folder, imports whatever is waiting, then keeps watching it.
+    /// Creates the folders and starts watching them, then imports whatever is waiting. Watching comes first so a
+    /// file that lands during the first scan is still noticed instead of falling in the gap between the two.
     func start() {
+        started = true
         for folder in folders {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            watch(folder)
         }
         scan()
-        folders.forEach(watch)
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -53,19 +63,51 @@ final class AgentInbox {
         }
     }
 
+    /// Watches the folder's contents and the folder itself. If the folder is deleted or renamed (the user tidying
+    /// up, a cleanup tool emptying the temp folder), the descriptor keeps pointing at the old inode and never fires
+    /// again, so that case rebuilds the folder and the watcher.
     private func watch(_ folder: URL) {
         let descriptor = open(folder.path, O_EVTONLY)
         guard descriptor >= 0 else {
             NSLog("Monotask: couldn't watch the inbox at \(folder.path)")
             return
         }
-        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: .write, queue: .main)
-        source.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.scheduleScan() }
+        var info = stat()
+        fstat(descriptor, &info)
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor, eventMask: [.write, .delete, .rename], queue: .main)
+        source.setEventHandler { [weak self, weak source] in
+            MainActor.assumeIsolated {
+                guard let self, let source else { return }
+                if source.data.contains(.delete) || source.data.contains(.rename) {
+                    self.rewatch(folder)
+                } else {
+                    self.scheduleScan()
+                }
+            }
         }
         source.setCancelHandler { close(descriptor) }
         source.resume()
-        sources.append(source)
+        watchers[folder.path] = Watcher(source: source, inode: UInt64(info.st_ino))
+    }
+
+    /// Drops the old watcher, makes sure the folder exists again and watches the new one.
+    private func rewatch(_ folder: URL) {
+        watchers.removeValue(forKey: folder.path)?.source.cancel()
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        watch(folder)
+        scheduleScan()
+    }
+
+    /// For a folder swapped without an event reaching us: if the path now names a different inode than the one
+    /// being watched (or nothing is watched), start over.
+    private func ensureWatching() {
+        guard started else { return }
+        for folder in folders {
+            var info = stat()
+            if let watcher = watchers[folder.path], stat(folder.path, &info) == 0, watcher.inode == UInt64(info.st_ino) { continue }
+            rewatch(folder)
+        }
     }
 
     /// A burst of files (or the delete after an import) triggers one scan, not many.
@@ -82,6 +124,7 @@ final class AgentInbox {
     /// Returns how many items were added to Do Next.
     @discardableResult
     func scan() -> Int {
+        ensureWatching()
         let files = FileManager.default
         let waiting = folders.flatMap { folder in
             ((try? files.contentsOfDirectory(atPath: folder.path)) ?? [])
@@ -91,17 +134,39 @@ final class AgentInbox {
         .sorted { $0.name < $1.name }
         var lastPosition: Int?
         var added = 0
+        var done: [URL] = []
         for (_, url) in waiting {
+            // Only plain files carry items. Reading a named pipe would block the main thread until a writer shows up.
+            guard Self.isRegularFile(url) else {
+                Self.discard(url)
+                continue
+            }
             guard let title = Self.title(from: url) else { continue }
             if !title.isEmpty && !isKnown(title), let position = store.capture(title) {
                 lastPosition = position
                 added += 1
             }
             // Blank, duplicate or imported: in every case the file has done its job.
-            try? files.removeItem(at: url)
+            done.append(url)
         }
+        // The items must be on disk before the files that carry them go; a crash in between would lose them.
+        if added > 0 { store.saveNow() }
+        for url in done { try? files.removeItem(at: url) }
         if let lastPosition { onAdded(lastPosition) }
         return added
+    }
+
+    /// A regular file, not a symlink, pipe, socket or folder (looked at without following links).
+    private static func isRegularFile(_ url: URL) -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFREG
+    }
+
+    /// Removes something that isn't a plain file: a folder only if it is empty, anything else by unlinking it.
+    private static func discard(_ url: URL) {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return }
+        if (info.st_mode & S_IFMT) == S_IFDIR { rmdir(url.path) } else { unlink(url.path) }
     }
 
     private func isKnown(_ title: String) -> Bool {
@@ -112,7 +177,16 @@ final class AgentInbox {
 
     /// The first line of the file, trimmed and capped; nil if the file can't be read at all.
     private static func title(from url: URL) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        // Opened without blocking or following links, and checked again once open: the file could have been swapped
+        // for a pipe since the scan looked at it.
+        let descriptor = open(url.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
+        guard descriptor >= 0 else { return nil }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+            close(descriptor)
+            return nil
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? handle.close() }
         // A title is one short line; never read more than a few KB of something unexpected.
         guard let data = try? handle.read(upToCount: 8192) else { return nil }

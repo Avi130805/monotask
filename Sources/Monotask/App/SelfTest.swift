@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Exercises the Do Now / Do Next rules, the event history, the insight maths, the prompter's markup and timing
 /// and the coding-agent bridge against throwaway files. Run with `Monotask --selftest`.
@@ -112,6 +112,12 @@ enum SelfTest {
         print("Moving from Next")
         checkMigration(check, scratch: folder.appendingPathComponent("migration", isDirectory: true), list: stateURL)
 
+        print("Notch windows")
+        check(NotchController.isMenuWindow(level: .popUpMenu), "a pop-up menu window is a menu")
+        check(!NotchController.isMenuWindow(level: .normal) && !NotchController.isMenuWindow(level: .floating)
+              && !NotchController.isMenuWindow(level: .mainMenu + 3) && !NotchController.isMenuWindow(level: nil),
+              "Insights, the script editor, the panel itself and no window at all are not menus")
+
         print(failures == 0 ? "All checks passed." : "\(failures) check(s) failed.")
         return failures == 0
     }
@@ -177,6 +183,16 @@ enum SelfTest {
         startup.start()
         check((try? String(contentsOf: startupFolder.appendingPathComponent(AgentBridge.fileName), encoding: .utf8))
               == AgentContext.text(for: running.state) && startup.writes == 1, "the file is written at launch when Do Now is already filled")
+        startup.stop()
+        check(!files.fileExists(atPath: startupFolder.appendingPathComponent(AgentBridge.fileName).path),
+              "quitting removes the agent context file")
+        running.capture("Added after quitting")
+        check(!files.fileExists(atPath: startupFolder.appendingPathComponent(AgentBridge.fileName).path),
+              "a stopped bridge doesn't write the file again")
+        let relaunched = AgentBridge(store: running, folder: startupFolder)
+        relaunched.start()
+        check((try? String(contentsOf: startupFolder.appendingPathComponent(AgentBridge.fileName), encoding: .utf8))
+              == AgentContext.text(for: running.state), "the next launch writes the file again")
 
         // The inbox.
         let inboxStore = makeStore("inbox")
@@ -202,6 +218,9 @@ enum SelfTest {
               && inboxStore.events.last?.kind == .captured && inboxStore.events.last?.title == "Add retry to the webhook",
               "an import records a captured event")
         check(announced == [inboxStore.next.count], "an import reports where the item landed")
+        check(Store(fileURL: scratch.appendingPathComponent("inbox.json"), eventsURL: scratch.appendingPathComponent("inbox-events.jsonl"))
+                .next.contains { $0.title == "Add retry to the webhook" },
+              "an imported item is already saved to disk when its file is deleted")
 
         let before = inboxStore.next.count
         drop("002-blank.txt", "  \n \n")
@@ -236,6 +255,17 @@ enum SelfTest {
         check(inboxStore.next.suffix(from: count).map(\.title) == ["First in line", "Second in line", "Third in line"]
               && announced.last == inboxStore.next.count, "several files are imported in name order")
 
+        // A named pipe in the inbox must not block the scan; it's deleted and the real file beside it still imports.
+        let pipe = inbox.folder.appendingPathComponent("025-pipe.txt")
+        check(mkfifo(pipe.path, 0o600) == 0, "a named pipe can be created for the test")
+        drop("026-after-pipe.txt", "Beside a pipe")
+        check(inbox.scan() == 1 && inboxStore.next.last?.title == "Beside a pipe" && waiting().isEmpty,
+              "a named pipe in the inbox is deleted without being read")
+        let pipedFolder = inbox.folder.appendingPathComponent("027-folder.txt", isDirectory: true)
+        try? files.createDirectory(at: pipedFolder, withIntermediateDirectories: true)
+        inbox.scan()
+        check(waiting().isEmpty, "an empty folder named like an item is cleared away")
+
         inbox.start()
         let temporary = inbox.folder.appendingPathComponent(".tmp-live")
         try? Data("Added while watching".utf8).write(to: temporary)
@@ -250,6 +280,39 @@ enum SelfTest {
         check(inboxStore.next.last?.title == "From a sandboxed agent"
               && ((try? files.contentsOfDirectory(atPath: spool.path)) ?? []).isEmpty,
               "the temp-folder spool for sandboxed agents is watched and emptied too")
+
+        // The watcher survives its folder being deleted and recreated.
+        func land(_ name: String, _ title: String, in folder: URL) {
+            let hidden = folder.appendingPathComponent(".tmp-\(name)")
+            try? Data(title.utf8).write(to: hidden)
+            try? files.moveItem(at: hidden, to: folder.appendingPathComponent(name))
+        }
+        try? files.removeItem(at: inbox.folder)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        var isFolder: ObjCBool = false
+        check(files.fileExists(atPath: inbox.folder.path, isDirectory: &isFolder) && isFolder.boolValue,
+              "a deleted inbox folder is recreated")
+        land("300-after-delete.txt", "After the folder was deleted", in: inbox.folder)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        check(inboxStore.next.last?.title == "After the folder was deleted" && waiting().isEmpty,
+              "the watcher keeps working after the inbox folder was deleted")
+
+        try? files.removeItem(at: spool)
+        try? files.createDirectory(at: spool, withIntermediateDirectories: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        land("310-after-swap.txt", "After the spool was swapped", in: spool)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        check(inboxStore.next.last?.title == "After the spool was swapped",
+              "the watcher keeps working after the spool folder was replaced")
+
+        // A swap nobody was told about is caught by the next scan, from the folder's inode.
+        try? files.removeItem(at: inbox.folder)
+        try? files.createDirectory(at: inbox.folder, withIntermediateDirectories: true)
+        inbox.scan()
+        land("320-after-silent-swap.txt", "After a silent swap", in: inbox.folder)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        check(inboxStore.next.last?.title == "After a silent swap" && waiting().isEmpty,
+              "a scan notices a replaced folder and watches the new one")
     }
 
     private static func checkMigration(_ check: (Bool, String) -> Void, scratch: URL, list: URL) {
@@ -278,6 +341,18 @@ enum SelfTest {
         oldDefaults.set(true, forKey: Prefs.openOnHover)
         oldDefaults.set(false, forKey: Prefs.haptics)
         defaults.set(true, forKey: Prefs.haptics)
+
+        // A copy that fails halfway leaves nothing behind, so the next launch can try again.
+        let locked = old.appendingPathComponent("locked.bin")
+        try? Data("unreadable".utf8).write(to: locked)
+        try? files.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        let failed = !LegacyData.migrate(from: old, to: new, defaults: defaults, oldDefaults: oldDefaults)
+        check(failed && !files.fileExists(atPath: new.path)
+              && ((try? files.contentsOfDirectory(atPath: scratch.path)) ?? []).sorted() == ["Next"],
+              "a copy that fails halfway leaves no partial folder or leftovers")
+        check(!defaults.bool(forKey: Prefs.openOnHover), "settings are not carried over when the copy failed")
+        try? files.setAttributes([.posixPermissions: 0o644], ofItemAtPath: locked.path)
+        try? files.removeItem(at: locked)
         check(LegacyData.migrate(from: old, to: new, defaults: defaults, oldDefaults: oldDefaults)
               && (try? Data(contentsOf: new.appendingPathComponent("state.json"))) == (try? Data(contentsOf: list))
               && files.fileExists(atPath: new.appendingPathComponent("prompter.txt").path),

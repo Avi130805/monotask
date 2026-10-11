@@ -124,8 +124,8 @@ Everything is in `~/Library/Application Support/Monotask/`:
 - `state.json` holds Do Now, Do Next and the log. It's rewritten whenever something changes.
 - `events.jsonl` is the history Insights are built from: one line per capture, start, split, block, drop, delete or finish. Lines are only ever added.
 - `backups/` keeps the first copy of both files from each of the last 14 days.
-- `agent-context.md` is what coding agents read: your Do Now and its finish line. It exists only while something is in Do Now.
-- `inbox/` is where agents drop items for Do Next. Sandboxed agents use `$TMPDIR/monotask-inbox/` instead. Monotask imports both and empties them.
+- `agent-context.md` is what coding agents read: your Do Now and its finish line. It exists only while something is in Do Now, and only while Monotask is running.
+- `inbox/` is where agents drop items for Do Next. Sandboxed agents use `monotask-inbox/` in your per-user temporary folder (`getconf DARWIN_USER_TEMP_DIR`) instead. Monotask imports both and empties them.
 - `prompter.txt` is the prompter's script.
 
 ## Building

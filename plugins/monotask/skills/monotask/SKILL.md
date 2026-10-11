@@ -9,27 +9,27 @@ Monotask is the user's one-task-at-a-time macOS app. It keeps one task, the Do N
 
 ## Reading the task
 
-The current Do Now and its finish line reach you automatically at session start, and again whenever it changes. To re-read it at any point, run:
+The current Do Now and its finish line reach you automatically at session start, and again whenever it changes. To re-read it at any point, run `now` with the exact command from the session context (the last line there gives it):
 
 ```
-monotask now
+<command from the session context> now
 ```
 
 It prints the task and what done means, or `No task in Do Now.` when the user has none. Requests that serve the task are part of it. Anything else is separate work: a one-line note that it isn't their Do Now, then the help they asked for.
 
 ## Parking side work
 
-When you notice work that does not belong in the current change, keep it out of the change and offer to park it: ask the user whether to put it on their Do Next. Only after they agree, run:
+When you notice work that does not belong in the current change, keep it out of the change and offer to park it: ask the user whether to put it on their Do Next. Only after they agree, run it with the exact command from the session context:
 
 ```
-monotask add "Fix flaky auth test"
+<command from the session context> add "Fix flaky auth test"
 ```
 
 - One item per call.
 - A short imperative title, under about 60 characters.
 - Do not add anything the user has not agreed to.
 
-The item shows up in the user's Do Next. In hosts where `monotask` is not on the PATH (Codex), the session's Monotask context names the full command path to use in its last line; use that path in place of `monotask` for both `add` and `now`.
+The item shows up in the user's Do Next. The session's Monotask context gives the exact command in its last line: plain `monotask` in Claude Code, the full path of the script in Codex, which does not put it on the PATH. Use that exact command. If `add` says it couldn't reach Monotask, tell the user and let them add the item themselves with ⌥Space.
 
 ## What stays with the user
 
