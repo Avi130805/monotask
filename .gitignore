@@ -5,3 +5,4 @@ build/
 /snapshots/
 .swiftpm/
 *.xcuserstate
+.claude/worktrees/

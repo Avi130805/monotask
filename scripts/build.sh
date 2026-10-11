@@ -18,6 +18,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp .build/release/Monotask "$app/Contents/MacOS/Monotask"
 cp Resources/Info.plist "$app/Contents/Info.plist"
 cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+cp LICENSE THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"
 codesign --force --sign - "$app" 2>/dev/null
 echo "Built $app"
 

@@ -30,5 +30,7 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Avinash. MIT License.</string>
 </dict>
 </plist>
