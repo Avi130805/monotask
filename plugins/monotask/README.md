@@ -29,7 +29,18 @@ codex plugin marketplace add Avi130805/monotask
 codex plugin add monotask@monotask
 ```
 
-Then trust the hooks once: start `codex` in a terminal, run `/hooks`, and approve the six Monotask hooks (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, SessionEnd). Codex asks again only if the hook commands change. If you approved the first four with an earlier version, only the two tool hooks are new.
+Then trust the hooks once: start `codex` in a terminal, run `/hooks`, and approve the eight Monotask hooks (SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, Interrupt, SessionEnd). Codex asks again only if the hooks change. If you approved hooks with an earlier version, Codex asks once more for all eight: they moved to their own file, and Codex remembers approvals per file.
+
+### Hooks per host
+
+Each host reads its own hooks file, so neither sees an event it doesn't know:
+
+| Host | File | Events |
+| --- | --- | --- |
+| Claude Code | `hooks/hooks.json` (its default) | SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Notification (`permission_prompt`, `idle_prompt`), StopFailure, Stop, SessionEnd |
+| Codex | `hooks/codex.json` (named by `hooks` in `.codex-plugin/plugin.json`, which replaces Codex's default `hooks/hooks.json`) | SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, Interrupt, SessionEnd |
+
+The commands shared by both files are identical.
 
 Hook support in the Codex desktop app depends on its version. If your app version does not run plugin hooks, the plugin's skill and the command still work, but the task is not injected automatically. Use the terminal CLI for the full behavior.
 
@@ -82,9 +93,11 @@ The activity markers are in `agents/` in the data folder: one file per live agen
 | --- | --- |
 | `busy <epoch-seconds> <claude\|codex>` | you send a prompt (UserPromptSubmit), and after each tool call (PostToolUse) |
 | `tool <epoch-seconds> <claude\|codex>` | a tool starts (PreToolUse). A long build or test run fires nothing else until it ends. |
-| `idle <epoch-seconds> <claude\|codex>` | the agent finishes its turn (Stop) |
+| `idle <epoch-seconds> <claude\|codex>` | the agent finishes its turn (Stop), or waits for you: a permission prompt (Claude Code's `permission_prompt` notification, Codex's PermissionRequest), an interrupt (Codex's Interrupt), no reply from you for a minute (Claude Code's `idle_prompt` notification), or a turn that failed (Claude Code's StopFailure) |
 
-The tool hooks fire around every tool call, so they only read the session id from the start of their input, never the tool's arguments or output, and take a few milliseconds. Monotask counts a session as working while its marker says `busy` and is under 10 minutes old, or `tool` and under an hour old. Claude Code fires no Stop when you interrupt with Esc, so an interrupted session counts as working until those times run out (or until no `claude` or `codex` process is left).
+The tool hooks and the waiting hooks only read the session id from the start of their input, never the tool's arguments or output, print nothing, and take a few milliseconds. Monotask counts a session as working while its marker says `busy` and is under 10 minutes old, or `tool` and under 30 minutes old. A `tool` marker counts for up to an hour only while the agents' child processes (the build or test run) are seen using the CPU, since PreToolUse also fires before a permission prompt that nobody may answer. Claude Code fires no Stop when you interrupt with Esc, so an interrupted session counts as working until those times run out, an `idle_prompt` notification arrives, or no `claude` or `codex` process is left.
+
+Once you approve a permission prompt, the tool runs with the marker at `idle` until it finishes (no hook fires in between), so a long build you approved and then walked away from doesn't keep a closed Mac awake.
 
 ## Uninstall
 

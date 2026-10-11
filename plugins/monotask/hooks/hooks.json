@@ -1,5 +1,5 @@
 {
-  "description": "Monotask: tells your coding agent the one task you're on, and when it is working.",
+  "description": "Monotask for Claude Code: tells your coding agent the one task you're on, and when it is working. Codex reads hooks/codex.json instead.",
   "hooks": {
     "SessionStart": [
       {
@@ -62,6 +62,29 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/monotask\" hook post-tool || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/monotask\" hook waiting || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/monotask\" hook waiting || true",
             "timeout": 5
           }
         ]

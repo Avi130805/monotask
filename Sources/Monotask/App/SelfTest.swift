@@ -708,7 +708,51 @@ extension SelfTest {
             AgentActivity.isWorking(AgentActivity.Marker(kind: kind, at: now.addingTimeInterval(-secondsAgo), host: "claude"), now: now)
         }
         check(working(.busy, 9 * 60) && !working(.busy, 11 * 60), "busy counts as working for 10 minutes")
-        check(working(.tool, 59 * 60) && !working(.tool, 61 * 60), "a running tool counts as working for an hour")
+        check(working(.tool, 29 * 60) && !working(.tool, 31 * 60),
+              "a running tool counts as working for 30 minutes on its own (it may be a permission prompt nobody answers)")
+        check(AgentActivity.isWorking(AgentActivity.Marker(kind: .tool, at: now.addingTimeInterval(-59 * 60), host: "claude"), now: now, toolsBusy: true)
+              && !AgentActivity.isWorking(AgentActivity.Marker(kind: .tool, at: now.addingTimeInterval(-61 * 60), host: "claude"), now: now, toolsBusy: true),
+              "…and for up to an hour while the agents' child processes use the CPU")
+        check(AgentActivity.cpuSeconds("0:01.23") == 1.23 && AgentActivity.cpuSeconds("95:17.19") == 95 * 60 + 17.19
+              && AgentActivity.cpuSeconds("1:02:03") == 3_723 && AgentActivity.cpuSeconds("2-00:00:01.50") == 172_801.5
+              && AgentActivity.cpuSeconds("abc") == nil && AgentActivity.cpuSeconds("12") == nil && AgentActivity.cpuSeconds("1:-2") == nil,
+              "ps's CPU times are read: mm:ss.cc, hh:mm:ss and dd-hh:mm:ss")
+        let table = """
+            1     0  95:17.19 /sbin/launchd
+          100     1   1:00.00 /Users/a/.local/bin/claude --resume
+          200   100   0:00.10 /bin/zsh -c make test
+          300   200   2:00.00 /usr/bin/make test
+          400     1   9:00.00 /usr/bin/unrelated
+          500     1   0:30.00 codex
+          600   500   0:05.00 /bin/bash -lc cargo build
+          700     1   0:20.00 node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js
+          800   700   0:01.00 /usr/bin/python3 tests.py
+          900     1   0:01.00 /Applications/Claude.app/Contents/MacOS/Claude
+          950   900   0:09.00 /usr/bin/helper
+        garbage line
+        """
+        let children = AgentActivity.agentChildrenCPU(processTable: table)
+        check(children == [200: 0.1, 300: 120, 600: 5, 800: 1],
+              "the agents' child processes are found under claude, codex and node-run Claude Code, leaving the agents and everything else out")
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let before = AgentActivity.ProcessSample(at: t0, cpu: [300: 120])
+        check(AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 5, cpu: [300: 120.5]))
+              && AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 5, cpu: [300: 120, 301: 0.3])),
+              "a child that used CPU since the last look, or a new one that has, is evidence of work")
+        check(!AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 5, cpu: [300: 120.05]))
+              && !AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 5, cpu: [:]))
+              && !AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 60, cpu: [300: 200]))
+              && !AgentActivity.toolsBusy(before: nil, after: before) && !AgentActivity.toolsBusy(before: before, after: nil),
+              "idle children, no children, samples too far apart or a missing sample are not")
+        check(AgentActivity.sampleProcesses(now: t0, run: { path, arguments, _ in
+                  path == "/bin/ps" && arguments == ["-A", "-o", "pid=,ppid=,time=,args="] ? (0, Data(table.utf8)) : nil
+              })?.cpu == children && AgentActivity.sampleProcesses(now: t0, run: { _, _, _ in nil }) == nil,
+              "a sample comes from /bin/ps -A -o pid=,ppid=,time=,args=; ps failing gives none")
+        let slowStart = Date()
+        check(AgentActivity.capture("/bin/sleep", ["5"], timeout: 0.5) == nil && Date().timeIntervalSince(slowStart) < 2.5,
+              "a command that hangs is killed after its timeout and counts as unknown")
+        check(AgentActivity.capture("/bin/echo", ["hi"], timeout: 3).map { $0.status == 0 && $0.output == Data("hi\n".utf8) } == true,
+              "a quick command's status and output come back")
         check(!working(.idle, 1) && !working(.idle, 0), "idle never counts as working")
         check(!working(.busy, -10 * 60) && working(.busy, -60), "a marker far in the future is ignored; a little clock skew isn't")
 
@@ -716,7 +760,8 @@ extension SelfTest {
         try? files.createDirectory(at: scratch, withIntermediateDirectories: true)
         func put(_ name: String, _ text: String) { try? Data(text.utf8).write(to: scratch.appendingPathComponent(name)) }
         put("a", "busy \(at(30)) claude\n")
-        put("b", "tool \(at(30 * 60)) codex\n")
+        put("b", "tool \(at(20 * 60)) codex\n")
+        put("f", "tool \(at(40 * 60)) claude\n")
         put("c", "idle \(at(10)) claude\n")
         put("d", "garbage")
         put("e", "busy \(at(3_600)) claude\n")
@@ -727,8 +772,10 @@ extension SelfTest {
         mkfifo(pipe.path, 0o600)
         let started = Date()
         let summary = AgentActivity.summarize(folder: scratch, now: now)
-        check(summary.working == 2 && summary.sessions == 4 && summary.hosts == ["claude": 1, "codex": 1],
+        check(summary.working == 2 && summary.sessions == 5 && summary.hosts == ["claude": 1, "codex": 1] && summary.longTools == 1,
               "a folder of markers counts the working sessions; dot-files, links, oversized files and garbage are skipped")
+        check(AgentActivity.summarize(folder: scratch, now: now, toolsBusy: true).working == 3,
+              "with CPU evidence, a tool running for 40 minutes counts too")
         check(Date().timeIntervalSince(started) < 2, "a named pipe among the markers doesn't block the scan")
         check(AgentActivity.summarize(folder: scratch, now: now, agentsAlive: false).working == 0,
               "with no Claude Code or Codex process left, every marker expires early")
@@ -801,6 +848,7 @@ extension SelfTest {
             ("the floor never goes below 10%", { $0.settings.batteryFloor = 5; $0.sensors.batteryPercent = 10 }, false, .batteryLow(10)),
             ("11% with a floor set to 5: awake", { $0.settings.batteryFloor = 5; $0.sensors.batteryPercent = 11 }, true, .working(1)),
             ("no battery (a desktop): awake", { $0.sensors.batteryPercent = nil }, true, .working(1)),
+            ("a battery that can't be read: sleep", { $0.sensors.batteryPercent = nil; $0.sensors.hasBattery = true }, false, .batteryUnknown),
             ("the time limit reached with the lid closed: sleep", { $0.lid.awakeSince = now.addingTimeInterval(-7_200) }, false, .timeLimit),
             ("just under the time limit: awake", { $0.lid.awakeSince = now.addingTimeInterval(-7_100) }, true, .working(1)),
             ("the time limit is about the lid being closed", { $0.lid = LidPolicy.Lid(closed: false, awakeSince: nil) }, true, .working(1)),
@@ -821,7 +869,12 @@ extension SelfTest {
               && decide({ $0.lid = LidPolicy.Lid(closed: false, awakeSince: nil) }, latch: .hot).latch == nil,
               "opening the lid lets go of the latch")
         let done = decide({ $0.activity = LidPolicy.Activity(working: 0, lastWorking: now.addingTimeInterval(-300)) }, latch: .batteryLow(20))
-        check(says(done, false, .idle) && done.latch == nil, "agents being done lets go of the latch")
+        check(says(done, false, .batteryLow(20)) && done.latch == .batteryLow(20),
+              "agents being done doesn't let go of the latch while the lid stays closed")
+        let missing = decide({ $0.sensors.helperReady = false }, latch: .timeLimit)
+        check(says(missing, false, .helperMissing) && missing.latch == .timeLimit, "the helper going quiet doesn't drop the latch")
+        check(decide({ $0.activity = LidPolicy.Activity() ; $0.sensors.lowPowerMode = true }).latch == .lowPowerMode,
+              "a cutout with the lid closed latches even when no agent is working")
         check(says(decide({ $0.sensors.thermal = .critical }, latch: .timeLimit), false, .tooHot), "critical heat wins over any latch")
         check(decide({ $0.lid = LidPolicy.Lid(closed: false, awakeSince: nil); $0.sensors.lowPowerMode = true }).latch == nil,
               "with the lid open a cutout doesn't latch")
@@ -838,11 +891,11 @@ extension SelfTest {
             }
             let first = LidPolicy.decide(input, latch: nil)
             check(first.latch == reason && LidPolicy.decide(base, latch: first.latch).reason == reason,
-                  "the \(reason) cutout latches until the lid opens or the agents are done")
+                  "the \(reason) cutout latches until the lid opens")
         }
 
         let texts = [LidReason.off, .helperMissing, .idle, .working(1), .working(3), .finishing, .tooHot, .hot,
-                     .lowPowerMode, .onBattery, .batteryLow(21), .timeLimit, .noInternet].map(\.text)
+                     .lowPowerMode, .onBattery, .batteryLow(21), .batteryUnknown, .timeLimit, .noInternet].map(\.text)
         check(texts.allSatisfy { !$0.contains("—") && !$0.contains("–") && !$0.isEmpty }, "status lines are plain, with no dashes")
         check(LidReason.working(1).text == "Keeping your Mac awake: 1 agent working"
               && LidReason.working(2).text == "Keeping your Mac awake: 2 agents working"
@@ -1075,6 +1128,31 @@ extension SelfTest {
         rig.rounds(3, .online)
         check(rig.machine.phase == .fallbackActive("Cafe"), "and it stays on it while it works")
 
+        // A network whose password macOS hasn't saved.
+        rig = FailoverRig(fallbacks: ["Cafe", "Home"])
+        rig.rounds(3, .down)
+        rig.finish(.unavailable)
+        rig.finish(.needsPassword)
+        check(rig.joins == ["Cafe", "Home"] && rig.machine.needsPassword == ["Cafe"] && rig.machine.ledger.networks["Cafe"] == nil
+              && !rig.machine.isAvailable("Cafe", now: rig.now + 3_600),
+              "a network that needs a password is marked unavailable, with no cooldown, and the next one is tried")
+        rig.finish(.needsPassword)
+        check(rig.machine.phase == .waiting && rig.machine.status(now: rig.now)
+              == "No internet · the fallback networks need their passwords saved: join each once from the Wi-Fi menu",
+              "with every fallback needing a password, the status says what to do")
+        rig.machine.setActive(false, now: rig.now)
+        check(rig.machine.needsPassword == ["Cafe", "Home"], "the marks stay while the lid is open, for the window")
+        rig.machine.setActive(true, now: rig.now)
+        check(rig.machine.needsPassword.isEmpty, "and are cleared the next time failover starts, to try again")
+        rig = FailoverRig(fallbacks: ["Cafe"])
+        rig.rounds(3, .down)
+        rig.finish(.unavailable)
+        rig.finish(.needsPassword)
+        check(rig.machine.status(now: rig.now) == "No internet · Cafe needs its password saved: join it once from the Wi-Fi menu",
+              "one network: named in the status")
+        rig.machine.fallbacks = []
+        check(rig.machine.needsPassword.isEmpty, "removing a network drops its mark")
+
         // Budget.
         var long = Failover.Config()
         long.giveUpAfter = 10 * 3_600
@@ -1196,7 +1274,7 @@ extension SelfTest {
         check(bareMatches == 0, "the helper runs every outside command by its absolute path")
         check(!code.contains("eval") && !code.contains("`") && !code.contains("sudo") && !code.contains(" source ")
               && !code.contains("\n. ") && !code.contains("curl"), "the helper has no eval, no sourcing, no backticks, no network")
-        check(script.hasPrefix("#!/bin/sh\n# monotask-lid-helper 1\n"), "the helper is versioned")
+        check(script.hasPrefix("#!/bin/sh\n# monotask-lid-helper 2\n"), "the helper is versioned (2: the TERM, read-back and cap-break fixes)")
 
         let files = FileManager.default
         for shell in ["/bin/sh", "/bin/dash"] where files.isExecutableFile(atPath: shell) {
@@ -1226,6 +1304,10 @@ extension SelfTest {
           -g) [ -e "$D/pmset-g-fails" ] && exit 1
               printf 'System-wide power settings:\\n SleepDisabled\\t\\t%s\\nCurrently in use:\\n sleep 1\\n' "$(cat "$D/flag")" ;;
           -a) [ -e "$D/pmset-a-fails" ] && exit 1
+              [ -e "$D/pmset-a-ignored" ] && exit 0
+              # pmset-slow: turning sleep off takes a second and commits last, even if pmset itself is signalled
+              # (the real change is made by powerd once pmset has asked).
+              if [ "$3" = 1 ] && [ -e "$D/pmset-slow" ]; then trap '' TERM HUP INT; /bin/sleep 1; fi
               [ "$2" = disablesleep ] && printf '%s' "$3" >"$D/flag" ;;
         esac
         exit 0
@@ -1252,8 +1334,8 @@ extension SelfTest {
             put("lid", lid)
             put("causes", causes)
             put("pmset.log", "")
-            for file in ["pmset-g-fails", "pmset-a-fails"] { try? files.removeItem(at: scratch.appendingPathComponent(file)) }
-            for file in [owned, capped, lease] { try? files.removeItem(at: file) }
+            for file in ["pmset-g-fails", "pmset-a-fails", "pmset-a-ignored", "pmset-slow"] { try? files.removeItem(at: scratch.appendingPathComponent(file)) }
+            for file in [owned, capped, lease, state.appendingPathComponent("lid-lapse")] { try? files.removeItem(at: file) }
         }
         func epoch(_ offset: TimeInterval = 0) -> Int { Int(Date().timeIntervalSince1970 + offset) }
         func writeLease(_ text: String) {
@@ -1305,7 +1387,8 @@ extension SelfTest {
         fresh(flag: "1")
         try? Data("\(epoch(-60))\n".utf8).write(to: owned)
         run(once: "boot")
-        check(flag() == "0" && !isOwned() && log() == "-a disablesleep 0\n", rule("at start a setting it left behind is cleared"))
+        check(flag() == "0" && !isOwned() && log() == "-a disablesleep 0\n-g\n",
+              rule("at start a setting it left behind is cleared, and read back before the marker goes"))
         fresh(flag: "1")
         run(once: "boot")
         check(flag() == "1" && log().isEmpty, rule("at start a setting someone else made is left alone"))
@@ -1412,9 +1495,23 @@ extension SelfTest {
         run()
         check(flag() == "0" && !log().contains("disablesleep 1") && status().contains("reason=cap"),
               rule("…and keeps ignoring leases while the same lease is renewed"))
+        let lapse = state.appendingPathComponent("lid-lapse")
         try? files.removeItem(at: lease)
         run()
-        check(!files.fileExists(atPath: capped.path), rule("…until the lease lapses once"))
+        check(files.fileExists(atPath: capped.path) && files.fileExists(atPath: lapse.path),
+              rule("…and a brief lapse (a dark wake, say) doesn't lift it"))
+        writeLease("awake \(epoch(60))")
+        run()
+        check(flag() == "0" && files.fileExists(atPath: capped.path) && !files.fileExists(atPath: lapse.path) && status().contains("reason=cap"),
+              rule("…so a lease that comes back is still capped, and the lapse starts over"))
+        try? files.removeItem(at: lease)
+        try? Data("\(epoch(-700)) \(epoch(-3_600))\n".utf8).write(to: lapse)
+        run()
+        check(files.fileExists(atPath: capped.path), rule("…time the Mac spent asleep doesn't count toward the 10-minute break"))
+        try? Data("\(epoch(-700)) \(epoch(-5))\n".utf8).write(to: lapse)
+        run()
+        check(!files.fileExists(atPath: capped.path) && !files.fileExists(atPath: lapse.path),
+              rule("…it lifts after 10 minutes awake with no lease"))
         writeLease("awake \(epoch(60))")
         run()
         check(flag() == "1", rule("then a new lease works again"))
@@ -1435,6 +1532,11 @@ extension SelfTest {
         try? files.removeItem(at: lease)
         run()
         check(!isOwned() && flag() == "0", rule("…and the marker goes once there's nothing to undo"))
+        fresh(flag: "1")
+        try? Data("\(epoch(-60))\n".utf8).write(to: owned)
+        put("pmset-a-ignored", "")
+        run(once: "boot")
+        check(flag() == "1" && isOwned(), rule("a turn-on that pmset reports done but doesn't read back keeps the marker, to retry"))
 
         // Being stopped.
         fresh()
@@ -1450,6 +1552,27 @@ extension SelfTest {
         } else {
             check(false, rule("the helper can be started in a loop for the TERM test"))
         }
+
+        // Stopped while a slow `pmset -a disablesleep 1` is still running: whenever TERM lands, sleep ends up back on,
+        // or the marker stays so the next start (or boot) turns it back on.
+        var raced: [String] = []
+        for delay in [0.0, 0.2, 0.5, 0.8, 1.1] {
+            fresh()
+            put("pmset-slow", "")
+            writeLease("awake \(epoch(60))")
+            guard let env = environment(once: nil), let process = launch(env, uid: "\(getuid())") else {
+                raced.append("\(delay): didn't start")
+                continue
+            }
+            let deadline = Date().addingTimeInterval(8)
+            while !log().contains("-a disablesleep 1") && Date() < deadline { usleep(10_000) }
+            usleep(useconds_t(delay * 1_000_000))
+            process.terminate()
+            _ = wait(process, seconds: 15)
+            usleep(1_300_000)   // anything still in flight lands
+            if flag() != "0" && !isOwned() { raced.append("\(delay) s: flag=\(flag()), no marker") }
+        }
+        check(raced.isEmpty, rule("TERM during a slow turn-off never leaves sleep off without a marker") + (raced.isEmpty ? "" : " \(raced)"))
 
         // Test switches are all or nothing.
         fresh()
@@ -1518,7 +1641,7 @@ extension SelfTest {
             }
             return words
         }
-        let allowed: Set<String> = ["set", "umask", "if", "[", "true", "fi", "/bin/launchctl", "/bin/mkdir", "/usr/sbin/chown",
+        let allowed: Set<String> = ["set", "umask", "if", "[", "true", "fi", "exit", "/bin/launchctl", "/bin/mkdir", "/usr/sbin/chown",
                                     "/bin/chmod", "/bin/echo", "/usr/bin/base64", "/bin/mv", "/bin/rm", "/bin/rmdir",
                                     "/usr/bin/pmset"]
         let installCommands = commands(shell)
@@ -1572,9 +1695,65 @@ extension SelfTest {
         let uninstall = LidHelper.uninstallScript
         check(uninstall.contains("/bin/launchctl bootout system/\(LidHelper.label)")
               && uninstall.contains("/bin/rm -f \(LidHelper.plistPath) \(LidHelper.helperPath)")
-              && uninstall.contains("if [ -e '\(LidHelper.ownedPath)' ]; then /usr/bin/pmset -a disablesleep 0; fi")
+              && uninstall.contains("if [ -e '\(LidHelper.ownedPath)' ]; then /usr/bin/pmset -a disablesleep 0 || exit 1; fi")
               && !uninstall.contains("disablesleep 1") && !visible.contains("disablesleep"),
               "removing stops the job, deletes both files and turns sleep back on only if Monotask turned it off")
+
+        // The uninstaller, run for real against a scratch copy of every path it names, with a fake pmset.
+        let sandbox = FileManager.default.temporaryDirectory.appendingPathComponent("monotask-uninstall-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+        let fakeState = sandbox.appendingPathComponent("state", isDirectory: true)
+        try? FileManager.default.createDirectory(at: fakeState, withIntermediateDirectories: true)
+        let fakePmset = sandbox.appendingPathComponent("pmset")
+        try? """
+        #!/bin/sh
+        echo "$*" >>'\(sandbox.path)/pmset.log'
+        [ -e '\(sandbox.path)/pmset-fails' ] && exit 1
+        exit 0
+
+        """.write(to: fakePmset, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakePmset.path)
+        let sandboxed = uninstall
+            .replacingOccurrences(of: "/bin/launchctl", with: "/usr/bin/true")
+            .replacingOccurrences(of: LidHelper.helperStaging, with: sandbox.path + "/helper.new")
+            .replacingOccurrences(of: LidHelper.plistStaging, with: sandbox.path + "/plist.new")
+            .replacingOccurrences(of: LidHelper.helperPath, with: sandbox.path + "/helper")
+            .replacingOccurrences(of: LidHelper.plistPath, with: sandbox.path + "/plist")
+            .replacingOccurrences(of: LidHelper.stateFolder, with: fakeState.path)
+            .replacingOccurrences(of: "/usr/bin/pmset", with: fakePmset.path)
+        /// Runs the sandboxed uninstaller with a marker (or not) and pmset failing (or not): its exit status, and what's left.
+        func uninstallRun(owned: Bool, pmsetFails: Bool) -> (status: Int32, ownedLeft: Bool, pmset: String)? {
+            guard !sandboxed.contains("/Library/"), !sandboxed.contains("launchctl"), !sandboxed.contains("/usr/bin/pmset"),
+                  sandbox.path.hasPrefix(FileManager.default.temporaryDirectory.path) else { return nil }
+            try? FileManager.default.createDirectory(at: fakeState, withIntermediateDirectories: true)
+            let marker = fakeState.appendingPathComponent("lid-owned")
+            if owned { try? Data("1800000000\n".utf8).write(to: marker) } else { try? FileManager.default.removeItem(at: marker) }
+            try? Data("alive 1 sleepDisabled=1 owned=1 reason=lease\n".utf8).write(to: fakeState.appendingPathComponent("lid-status"))
+            let fails = sandbox.appendingPathComponent("pmset-fails")
+            if pmsetFails { try? Data().write(to: fails) } else { try? FileManager.default.removeItem(at: fails) }
+            try? FileManager.default.removeItem(at: sandbox.appendingPathComponent("pmset.log"))
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", sandboxed]
+            process.environment = ["PATH": "/usr/bin:/bin"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            do { try process.run() } catch { return nil }
+            process.waitUntilExit()
+            let log = (try? String(contentsOf: sandbox.appendingPathComponent("pmset.log"), encoding: .utf8)) ?? ""
+            return (process.terminationStatus, FileManager.default.fileExists(atPath: marker.path), log)
+        }
+        let failed = uninstallRun(owned: true, pmsetFails: true)
+        check(failed != nil && failed?.status != 0 && failed?.ownedLeft == true,
+              "removing: if turning sleep back on fails, the uninstaller fails and keeps the marker, so it can be retried")
+        let worked = uninstallRun(owned: true, pmsetFails: false)
+        check(worked?.status == 0 && worked?.ownedLeft == false && worked?.pmset == "-a disablesleep 0\n",
+              "removing: with Monotask's marker, sleep is turned back on, then the state files go")
+        let untouched = uninstallRun(owned: false, pmsetFails: true)
+        check(untouched?.status == 0 && untouched?.pmset == "", "removing: without the marker, the sleep setting isn't touched")
+        check(LidController.uninstallFailureText(message: "x", sleepStillOff: true).contains("sudo pmset -a disablesleep 0")
+              && LidController.uninstallFailureText(message: "denied", sleepStillOff: false) == "denied",
+              "a failed removal that left sleep off says so, and how to fix it by hand")
 
         // Status lines.
         check(LidHelper.parseStatus("alive 1800000000 sleepDisabled=1 owned=1 reason=lease\n")
@@ -1596,21 +1775,24 @@ extension SelfTest {
 
 // MARK: - Lid-closed mode, the app's side
 
-/// Stand-ins for the real world: no network, no Wi-Fi changes, no Keychain.
-private final class FakePasswords: WiFiPasswordStoring, @unchecked Sendable {
-    var stored: [String: String] = [:]
-    func password(for ssid: String, interactive: Bool) -> String? { stored[ssid] }
-    func setPassword(_ password: String, for ssid: String) -> Bool { stored[ssid] = password; return true }
-    func removePassword(for ssid: String) { stored[ssid] = nil }
-}
-
+/// Stand-ins for the real world: no network, no Wi-Fi changes.
 private struct FakeProber: ConnectivityProbing {
     func probeRound() async -> [ProbeOutcome] { [.ok, .ok, .ok] }
 }
 
 private struct FakeWiFi: WiFiControlling {
     func powerCycle(device: String) -> Failover.ActionOutcome { .failed }
-    func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome { .failed }
+    func join(device: String, ssid: String) -> Failover.ActionOutcome { .failed }
+    func ensureOn(device: String) -> Bool { true }
+}
+
+/// Records what it's asked to do, in order.
+private final class RecordingWiFi: WiFiControlling, @unchecked Sendable {
+    var calls: [String] = []
+    var on = true
+    func powerCycle(device: String) -> Failover.ActionOutcome { calls.append("cycle \(device)"); return .failed }
+    func join(device: String, ssid: String) -> Failover.ActionOutcome { calls.append("join \(device) \(ssid)"); return .done }
+    func ensureOn(device: String) -> Bool { calls.append("on \(device)"); return on }
 }
 
 extension SelfTest {
@@ -1626,28 +1808,30 @@ extension SelfTest {
 
         var clock = Date(timeIntervalSince1970: 1_800_000_000)
         var thermal = ProcessInfo.ThermalState.nominal
-        var lidClosed = false
+        var lidClosed: Bool? = false
+        var batteryPercent: Int? = 90
         var installed = LidHelper.Installed.current
         var statusAge: TimeInterval = 2
         var statusAlive = true
+        var statusReason = "idle"
         var sleepDisabled: Bool? = false
         var owned = false
         var machine = LidMachine()
         machine.now = { clock }
         machine.thermal = { thermal }
         machine.lowPowerMode = { false }
-        machine.power = { PowerSource.Reading(onBattery: false, percent: 90) }
+        machine.power = { PowerSource.Reading(onBattery: false, percent: batteryPercent) }
+        machine.hasBattery = { true }
         machine.lidClosed = { lidClosed }
         machine.sleepDisabled = { sleepDisabled }
         machine.helperInstalled = { installed }
         machine.helperStatus = {
-            LidHelper.Status(alive: statusAlive, at: clock.addingTimeInterval(-statusAge), sleepDisabled: false, owned: false, reason: "idle")
+            LidHelper.Status(alive: statusAlive, at: clock.addingTimeInterval(-statusAge), sleepDisabled: false, owned: false, reason: statusReason)
         }
         machine.ownedMarkerExists = { owned }
 
-        let passwords = FakePasswords()
         let controller = LidController(dataFolder: scratch, defaults: defaults, machine: machine, interactive: false,
-                                       prober: FakeProber(), wifi: FakeWiFi(), passwords: passwords)
+                                       prober: FakeProber(), wifi: FakeWiFi())
         var commands: [Failover.Command] = []
         controller.commandSink = { commands.append($0) }
         let lease = controller.leaseURL
@@ -1678,6 +1862,15 @@ extension SelfTest {
         controller.evaluate(activity: one)
         check(leaseText() != nil, "a lease deleted from outside is written again")
 
+        clock += 20
+        controller.evaluate()
+        check(controller.working == 1, "between scans the last scan's count stands")
+        clock += 11
+        controller.evaluate()
+        check(controller.working == 0 && controller.decision.reason == .finishing,
+              "a scan over 30 s old counts as nobody working, so a hung scan can't keep the Mac awake")
+        controller.evaluate(activity: one)
+
         clock += 60
         controller.evaluate(activity: none)
         check(controller.decision.reason == .finishing && leaseText() != nil, "agents just finished: still awake for the grace period")
@@ -1694,6 +1887,10 @@ extension SelfTest {
         installed = .missing
         controller.evaluate(activity: one)
         check(controller.helperState == .missing && leaseText() == nil, "no helper installed: no lease")
+        installed = .outdated
+        controller.evaluate(activity: one)
+        check(controller.helperState == .outdated && controller.decision.reason == .helperMissing && leaseText() == nil,
+              "a helper from another version (or another user) that is running isn't used: no lease, and it asks to update")
         installed = .current
         statusAlive = false
         controller.evaluate(activity: one)
@@ -1724,9 +1921,42 @@ extension SelfTest {
         clock += 600
         controller.evaluate(activity: one)
         check(controller.decision.reason == .timeLimit && leaseText() == nil, "and it stays gone while the lid stays closed")
+        statusAge = 40
+        controller.evaluate(activity: one)
+        statusAge = 2
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit && leaseText() == nil,
+              "the helper going quiet for a moment doesn't reset the time limit")
+        clock += 600
+        controller.evaluate(activity: none)
+        clock += 600
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit && leaseText() == nil,
+              "agents stopping and starting again with the lid still closed don't reset it either")
         lidClosed = false
         controller.evaluate(activity: one)
         check(controller.decision.reason == .working(1), "opening the lid starts over")
+
+        // Sensors that fail don't fail open.
+        batteryPercent = nil
+        clock += 5
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .batteryUnknown && leaseText() == nil,
+              "a Mac with a battery that can't be read: the lease goes")
+        batteryPercent = 90
+        lidClosed = nil
+        clock += 5
+        controller.evaluate(activity: one)
+        clock += 7_205
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit && leaseText() == nil,
+              "a lid that can't be read counts as closed for the time limit")
+        clock += 5
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit, "…and for the latch")
+        lidClosed = false
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .working(1), "seeing the lid open starts over")
 
         // Failover runs only with the lid closed, the Mac kept awake, and the setting on.
         commands = []
@@ -1750,12 +1980,22 @@ extension SelfTest {
         defaults.set(false, forKey: Prefs.lidFailover)
 
         // A sleep setting left behind.
-        check(LidController.settingIsStuck(sleepDisabled: true, owned: true, helperFresh: false)
-              && !LidController.settingIsStuck(sleepDisabled: true, owned: false, helperFresh: false)
-              && !LidController.settingIsStuck(sleepDisabled: true, owned: true, helperFresh: true)
-              && !LidController.settingIsStuck(sleepDisabled: false, owned: true, helperFresh: false)
-              && !LidController.settingIsStuck(sleepDisabled: nil, owned: true, helperFresh: false),
-              "it warns only when sleep is off, Monotask's helper did it, and the helper isn't running to undo it")
+        check(LidController.settingIsStuck(sleepDisabled: true, owned: true, helperAlive: false, noLeaseFor: nil)
+              && !LidController.settingIsStuck(sleepDisabled: true, owned: false, helperAlive: false, noLeaseFor: 99)
+              && !LidController.settingIsStuck(sleepDisabled: true, owned: true, helperAlive: true, noLeaseFor: nil)
+              && !LidController.settingIsStuck(sleepDisabled: true, owned: true, helperAlive: true, noLeaseFor: 10)
+              && LidController.settingIsStuck(sleepDisabled: true, owned: true, helperAlive: true, noLeaseFor: 31)
+              && !LidController.settingIsStuck(sleepDisabled: false, owned: true, helperAlive: false, noLeaseFor: 99)
+              && !LidController.settingIsStuck(sleepDisabled: nil, owned: true, helperAlive: false, noLeaseFor: 99),
+              "it warns only when sleep is off, Monotask's helper did it, and the helper isn't running or hasn't undone it 30 s after the lease went")
+        check(LidController.helperNote(reason: "cap") != nil && LidController.helperNote(reason: "error") != nil
+              && LidController.helperNote(reason: "foreign") != nil && LidController.helperNote(reason: "lease") == nil
+              && LidController.helperNote(reason: "idle") == nil,
+              "the helper's cap, error and foreign reasons get a plain sentence; routine ones don't")
+        check(LidController.stuckText(helperAlive: true, reason: "error").contains("couldn't turn sleep back on")
+              && LidController.stuckText(helperAlive: true, reason: "cap").contains("8-hour limit")
+              && LidController.stuckText(helperAlive: false, reason: nil).contains("isn't running"),
+              "a stuck setting says why in plain words")
         sleepDisabled = true
         owned = true
         installed = .missing
@@ -1769,14 +2009,35 @@ extension SelfTest {
         controller.evaluate(activity: one)
         check(!controller.settingStuck, "once sleep is back on, the warning goes")
 
+        // The helper running, but failing to turn sleep back on.
+        defaults.set(false, forKey: Prefs.lidEnabled)
+        sleepDisabled = true
+        owned = true
+        statusReason = "error"
+        controller.evaluate(activity: one)
+        clock += 20
+        controller.evaluate(activity: one)
+        check(!controller.settingStuck, "a helper that's running gets a moment to turn sleep back on")
+        clock += 15
+        controller.evaluate(activity: one)
+        check(controller.settingStuck && controller.decision.reason == .off && controller.helperReason == "error"
+              && controller.stuckText.contains("couldn't turn sleep back on"),
+              "sleep still off, with Monotask's marker, 30 s after the app let go of its lease: stuck, even with the helper running")
+        sleepDisabled = false
+        owned = false
+        statusReason = "idle"
+        controller.evaluate(activity: one)
+        check(!controller.settingStuck, "and it clears once sleep is back on")
+        defaults.set(true, forKey: Prefs.lidEnabled)
+
         // Fallback networks.
-        check(controller.addFallback(name: "  Studio Wi-Fi ", password: "hunter22") && controller.fallbacks == ["Studio Wi-Fi"]
-              && passwords.stored["Studio Wi-Fi"] == "hunter22", "a fallback network is added, its password in the Keychain")
-        check(controller.addFallback(name: "Avi's iPhone", password: "") && passwords.stored["Avi's iPhone"] == nil,
-              "a network without a password stores none")
-        check(!controller.addFallback(name: "Studio Wi-Fi", password: "x") && !controller.addFallback(name: "  ", password: "x")
-              && !controller.addFallback(name: String(repeating: "n", count: 33), password: "x")
-              && !controller.addFallback(name: "Two\nlines", password: ""),
+        check(controller.addFallback(name: "  Studio Wi-Fi ") && controller.fallbacks == ["Studio Wi-Fi"]
+              && defaults.stringArray(forKey: Prefs.lidFallbackNetworks) == ["Studio Wi-Fi"],
+              "a fallback network is added by name only: no password is asked for or kept")
+        check(controller.addFallback(name: "Avi's iPhone"), "a second one too")
+        check(!controller.addFallback(name: "Studio Wi-Fi") && !controller.addFallback(name: "  ")
+              && !controller.addFallback(name: String(repeating: "n", count: 33))
+              && !controller.addFallback(name: "Two\nlines"),
               "duplicates, blanks, names over 32 bytes and control characters are refused")
         controller.moveFallback("Avi's iPhone", by: -1)
         check(controller.fallbacks == ["Avi's iPhone", "Studio Wi-Fi"]
@@ -1785,8 +2046,48 @@ extension SelfTest {
         controller.moveFallback("Avi's iPhone", by: -1)
         check(controller.fallbacks == ["Avi's iPhone", "Studio Wi-Fi"], "moving past the top does nothing")
         controller.removeFallback("Studio Wi-Fi")
-        check(controller.fallbacks == ["Avi's iPhone"] && passwords.stored["Studio Wi-Fi"] == nil,
-              "removing a network deletes its password too")
+        check(controller.fallbacks == ["Avi's iPhone"], "a network can be removed")
+
+        // Wi-Fi is never left off after a power cycle that didn't confirm it came back.
+        var power = WiFiPowerGuard()
+        check(!power.unconfirmed, "Wi-Fi power starts confirmed")
+        power.cycleStarted()
+        check(power.unconfirmed, "a power cycle in flight leaves Wi-Fi unconfirmed")
+        power.cycleFinished(.failed)
+        check(power.unconfirmed, "…and a failed one keeps it so")
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        check(power.shouldEnsure(failoverActive: false, now: t) && !power.shouldEnsure(failoverActive: true, now: t),
+              "when failover goes inactive with Wi-Fi unconfirmed, it's turned back on")
+        power.ensureStarted(now: t)
+        check(!power.shouldEnsure(failoverActive: false, now: t + 30), "one try at a time")
+        power.ensureFinished(confirmed: false)
+        check(!power.shouldEnsure(failoverActive: false, now: t + 30) && power.shouldEnsure(failoverActive: false, now: t + 61),
+              "a try that fails is repeated a minute later")
+        power.ensureFinished(confirmed: true)
+        check(!power.unconfirmed && !power.shouldEnsure(failoverActive: false, now: t + 120), "once Wi-Fi is confirmed on, nothing more")
+        power.cycleStarted()
+        power.cycleFinished(.done)
+        check(!power.unconfirmed, "a power cycle that confirmed Wi-Fi came back on needs nothing more")
+        power.cycleStarted()
+        power.cycleFinished(.unavailable)
+        check(!power.unconfirmed, "a power cycle macOS refused never turned Wi-Fi off")
+        let recorder = RecordingWiFi()
+        _ = LidController.performJoin(wifi: recorder, device: "en0", ssid: "Cafe", ensureFirst: true)
+        check(recorder.calls == ["on en0", "join en0 Cafe"], "before a join after an unconfirmed power cycle, Wi-Fi is turned on first")
+        recorder.calls = []
+        _ = LidController.performJoin(wifi: recorder, device: "en0", ssid: "Cafe", ensureFirst: false)
+        check(recorder.calls == ["join en0 Cafe"], "otherwise the join goes straight ahead")
+        check(NetworkSetupWiFi.classifyJoin((0, "")) == .done
+              && NetworkSetupWiFi.classifyJoin((0, "Could not find network Cafe.")) == .failed
+              && NetworkSetupWiFi.classifyJoin((1, "Failed to join network Cafe.\nError: -3900")) == .failed
+              && NetworkSetupWiFi.classifyJoin((0, "Failed to join network Cafe: a password is required")) == .needsPassword
+              && NetworkSetupWiFi.classifyJoin((1, "Failed to join network Cafe: invalid credentials")) == .needsPassword
+              && NetworkSetupWiFi.classifyJoin((14, "You must run this tool as an administrator.")) == .unavailable,
+              "networksetup's join answers are read: joined, failed, needs a password, needs an administrator")
+        check(NetworkSetupWiFi.isOn(airportPower: "Wi-Fi Power (en0): On\n") == true
+              && NetworkSetupWiFi.isOn(airportPower: "Wi-Fi Power (en0): Off\n") == false
+              && NetworkSetupWiFi.isOn(airportPower: "en0 is not a Wi-Fi interface.\n") == nil,
+              "networksetup -getairportpower is read: On, Off, or unknown")
 
         controller.evaluate(activity: one)
         check(leaseText() != nil, "a lease is held before quitting")

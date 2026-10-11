@@ -34,7 +34,7 @@ enum LidHelper {
     /// The helper, run by launchd as `/bin/sh <this> <lease path> <uid>`. POSIX sh, absolute command paths, no eval.
     static let script = #"""
 #!/bin/sh
-# monotask-lid-helper 1
+# monotask-lid-helper 2
 #
 # Monotask's lid helper. It keeps this Mac awake with the lid closed ("pmset -a disablesleep 1") only while the
 # Monotask app holds a fresh lease, and turns sleep back on as soon as the lease lapses, whenever it starts (after a
@@ -71,11 +71,14 @@ if [ -n "${MT_PMSET:-}${MT_IOREG:-}${MT_ROOT:-}${MT_ONCE:-}" ]; then
 fi
 
 OWNED="$STATE/lid-owned"      # holds the time we turned sleep off; exists only while we did
-CAPPED="$STATE/lid-capped"    # exists after the 8-hour limit, until the lease lapses once
+CAPPED="$STATE/lid-capped"    # exists after the 8-hour limit, until there has been no lease for 10 minutes awake
+LAPSE="$STATE/lid-lapse"      # while capped and without a lease: "<since> <last seen>", both epochs
 STATUS="$STATE/lid-status"    # one line for the app: alive <epoch> sleepDisabled=<0|1|?> owned=<0|1> reason=<word>
 INTERVAL=5
 LEASE_AHEAD=120               # a lease may run at most this many seconds ahead
 CAP=28800                     # 8 hours awake in a row
+CAP_BREAK=600                 # the cap lifts after this long awake with no lease…
+CAP_GAP=30                    # …watched without a gap longer than this (a gap means the Mac slept, and starts it over)
 
 /bin/mkdir -p "$STATE" 2>/dev/null
 
@@ -93,7 +96,8 @@ now() {
   /bin/date +%s
 }
 
-# bounded <seconds> <command...>: runs the command, killing it if it takes longer. Returns its status.
+# bounded <seconds> <command...>: runs the command, killing it if it takes longer. Returns its status. While it runs,
+# $b_pid names it, so a signal handler can let it finish first.
 bounded() {
   b_ticks=$(( $1 * 10 ))
   shift
@@ -108,6 +112,9 @@ bounded() {
     b_ticks=$((b_ticks - 1))
   done
   wait "$b_pid"
+  b_status=$?
+  b_pid=""
+  return "$b_status"
 }
 
 # Prints 1 or 0, the real SleepDisabled setting, or nothing when pmset can't say.
@@ -164,14 +171,13 @@ disable_sleep() {
   bounded 10 "$PMSET" -a disablesleep 1 >/dev/null 2>&1
 }
 
-# Turns sleep back on if we turned it off. True once it is no longer ours.
+# Turns sleep back on if we turned it off. True once it is no longer ours. The marker goes only once pmset reads back
+# 0, so a change that lands late (or a pmset that lied) leaves it for the next check, start or boot to retry.
 restore_sleep() {
   [ -e "$OWNED" ] || return 0
-  if bounded 10 "$PMSET" -a disablesleep 0 >/dev/null 2>&1; then
-    /bin/rm -f "$OWNED"
-    return 0
-  fi
-  return 1
+  bounded 10 "$PMSET" -a disablesleep 0 >/dev/null 2>&1 || return 1
+  [ "$(sleep_disabled)" = 0 ] || return 1
+  /bin/rm -f "$OWNED"
 }
 
 step() {
@@ -196,12 +202,31 @@ step() {
     reason=invalid
   fi
 
-  # Eight hours awake in a row: stop honouring leases until one lapses.
-  if [ "$want" = 1 ]; then
-    if [ -e "$CAPPED" ]; then
+  # Eight hours awake in a row: stop honouring leases until there has been none for 10 minutes the Mac was awake.
+  # Brief lapses (a dark wake in a bag, a hung app) don't count, so they can't start another eight hours.
+  if [ -e "$CAPPED" ]; then
+    if [ "$want" = 1 ]; then
       want=0
       reason=cap
-    elif [ "$owned" = 1 ]; then
+      /bin/rm -f "$LAPSE"
+    else
+      c_line="$(/usr/bin/head -c 32 "$LAPSE" 2>/dev/null)"
+      c_since="${c_line%% *}"
+      c_last="${c_line#* }"
+      if ! is_number "$c_since" || ! is_number "$c_last" || [ "$c_since" -gt "$t" ] || [ "$c_last" -gt "$t" ] \
+        || [ $((t - c_last)) -gt "$CAP_GAP" ]; then
+        c_since="$t"
+      fi
+      if [ $((t - c_since)) -ge "$CAP_BREAK" ]; then
+        /bin/rm -f "$CAPPED" "$LAPSE"
+      else
+        printf '%s %s\n' "$c_since" "$t" >"$LAPSE" 2>/dev/null
+        [ "$reason" = idle ] && reason=cap
+      fi
+    fi
+  else
+    /bin/rm -f "$LAPSE"
+    if [ "$want" = 1 ] && [ "$owned" = 1 ]; then
       since="$(/usr/bin/head -c 16 "$OWNED" 2>/dev/null)"
       if is_number "$since" && [ $((t - since)) -ge "$CAP" ]; then
         : >"$CAPPED"
@@ -209,8 +234,6 @@ step() {
         reason=cap
       fi
     fi
-  else
-    /bin/rm -f "$CAPPED"
   fi
 
   if [ "$want" = 1 ]; then
@@ -245,6 +268,9 @@ step() {
 }
 
 on_signal() {
+  # A pmset still running (turning sleep off, say) finishes first, so it can't land after the restore.
+  [ -n "${b_pid:-}" ] && wait "$b_pid"
+  b_pid=""
   restore_sleep
   o=0
   [ -e "$OWNED" ] && o=1
@@ -341,11 +367,12 @@ done
     }
 
     /// What runs as root to remove it all. Stopping the job makes the helper turn sleep back on; the marker check
-    /// catches a helper that was already gone.
+    /// catches a helper that was already gone. If turning sleep back on fails, it stops there with the marker kept
+    /// (and fails, so the window says so), so trying again still knows the setting is Monotask's to undo.
     static let uninstallScript = """
     /bin/launchctl bootout system/\(label) 2>/dev/null || true
     /bin/rm -f \(plistPath) \(helperPath) \(helperStaging) \(plistStaging)
-    if [ -e '\(ownedPath)' ]; then /usr/bin/pmset -a disablesleep 0; fi
+    if [ -e '\(ownedPath)' ]; then /usr/bin/pmset -a disablesleep 0 || exit 1; fi
     /bin/rm -f '\(stateFolder)/'lid-* '\(stateFolder)/'.lid-*
     /bin/rmdir '\(stateFolder)' 2>/dev/null || true
     """

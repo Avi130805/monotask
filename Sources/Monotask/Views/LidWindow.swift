@@ -24,7 +24,6 @@ final class LidWindow: NSObject, NSWindowDelegate {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         controller.tick()
-        controller.loadFallbackPasswords()
     }
 
     private func makeWindow() -> NSWindow {
@@ -139,11 +138,17 @@ struct LidSettingsView: View {
 
             Section {
                 LabeledContent {
-                    Button("Remove Helper…") { controller.uninstall() }
-                        .disabled(controller.work != nil || (controller.helperState == .missing && !controller.settingStuck))
+                    HStack(spacing: 8) {
+                        if controller.helperState == .outdated {
+                            Button("Update Helper…") { controller.install(enableAfter: false) }
+                                .disabled(controller.work != nil)
+                        }
+                        Button("Remove Helper…") { controller.uninstall() }
+                            .disabled(controller.work != nil || (controller.helperState == .missing && !controller.settingStuck))
+                    }
                 } label: {
                     Text("Helper")
-                    Text(Self.helperLine(controller.helperState))
+                    Text(Self.helperLine(controller.helperState, stuck: controller.settingStuck))
                 }
                 Text("A closed MacBook can't cool itself well, especially in a bag. Monotask lets your Mac sleep as soon as agents finish, it gets hot, the battery runs low, the time limit passes, or the internet is gone.")
                     .font(Typeface.footnote)
@@ -154,7 +159,7 @@ struct LidSettingsView: View {
         .formStyle(.grouped)
         .frame(minWidth: 500, minHeight: 480)
         .sheet(isPresented: $addingNetwork) {
-            AddNetworkSheet(onAdd: { controller.addFallback(name: $0, password: $1) }, onClose: { addingNetwork = false })
+            AddNetworkSheet(onAdd: { controller.addFallback(name: $0) }, onClose: { addingNetwork = false })
         }
     }
 
@@ -162,10 +167,11 @@ struct LidSettingsView: View {
         minutes < 60 ? "\(minutes) min" : minutes == 60 ? "1 hour" : "\(minutes / 60) hours"
     }
 
-    static func helperLine(_ state: LidController.HelperState) -> String {
+    static func helperLine(_ state: LidController.HelperState, stuck: Bool = false) -> String {
+        if stuck && state == .running { return "Running, but it couldn't turn sleep back on" }
         switch state {
         case .missing: return "Not installed"
-        case .outdated: return "From another version of Monotask"
+        case .outdated: return "From another version of Monotask, so it isn't used"
         case .stale: return "Installed, not responding"
         case .running: return "Installed and running"
         }
@@ -184,14 +190,29 @@ struct LidStatusRow: View {
                 Image(systemName: symbol)
                     .foregroundStyle(tint)
                     .frame(width: 18)
-                line(at: Date())
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    line(at: Date())
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let note {
+                        Text(note)
+                            .font(Typeface.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Spacer(minLength: 8)
                 if let action {
                     Button(action.title, action: action.run)
                 }
             }
         }
+    }
+
+    /// What the running helper says, in plain words, when it matters: its 8-hour limit, an error, a setting it didn't make.
+    private var note: String? {
+        guard controller.work == nil, !controller.settingStuck, enabled, controller.helperState == .running,
+              let reason = controller.helperReason else { return nil }
+        return LidController.helperNote(reason: reason)
     }
 
     private var problem: Bool {
@@ -201,12 +222,12 @@ struct LidStatusRow: View {
     private var text: String {
         if controller.work == .installing { return "Installing the helper…" }
         if controller.work == .removing { return "Removing the helper…" }
-        if controller.settingStuck { return "Your Mac is set to never sleep, and the helper isn't running to undo it." }
+        if controller.settingStuck { return controller.stuckText }
         guard enabled else { return LidReason.off.text }
         if controller.startingSince != nil && controller.helperState != .running { return "Starting the helper…" }
         switch controller.helperState {
         case .missing: return "The helper isn't installed, so your Mac sleeps as usual."
-        case .outdated: return "The helper is from another version of Monotask."
+        case .outdated: return "The helper is from another version of Monotask. Update it to use it."
         case .stale: return "The helper isn't responding, so your Mac sleeps as usual."
         case .running: break
         }
@@ -249,6 +270,7 @@ struct LidStatusRow: View {
         case .lowPowerMode: return "bolt.slash"
         case .onBattery: return "battery.75percent"
         case .batteryLow: return "battery.25percent"
+        case .batteryUnknown: return "battery.0percent"
         case .timeLimit: return "clock"
         case .noInternet: return "wifi.slash"
         }
@@ -286,9 +308,16 @@ struct FallbackList: View {
                     .frame(width: 14)
                 Image(systemName: "wifi")
                     .foregroundStyle(.secondary)
-                Text(ssid)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(ssid)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if controller.needsPassword.contains(ssid) {
+                        Text("Needs its password saved: join it once from the Wi-Fi menu")
+                            .font(Typeface.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer(minLength: 8)
                 Button { controller.moveFallback(ssid, by: -1) } label: { Image(systemName: "chevron.up") }
                     .disabled(index == 0)
@@ -297,19 +326,18 @@ struct FallbackList: View {
                     .disabled(index == controller.fallbacks.count - 1)
                     .help("Try this one later")
                 Button { controller.removeFallback(ssid) } label: { Image(systemName: "minus.circle") }
-                    .help("Remove, with its saved password")
+                    .help("Remove from this list")
             }
             .buttonStyle(.borderless)
         }
     }
 }
 
-/// Name and password for a fallback network. The password goes to the Keychain, never to Monotask's files.
+/// A fallback network, by name. Monotask keeps no password: macOS uses the one it saved when you joined the network.
 struct AddNetworkSheet: View {
-    var onAdd: (String, String) -> Bool
+    var onAdd: (String) -> Bool
     var onClose: () -> Void
     @State private var name = ""
-    @State private var password = ""
     @State private var refused = false
 
     var body: some View {
@@ -317,18 +345,17 @@ struct AddNetworkSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Add a fallback network")
                     .font(.headline)
-                Text("Its name exactly as Wi-Fi shows it. The password is kept in your Keychain.")
+                Text("Its name exactly as Wi-Fi shows it. Join this network once from the Wi-Fi menu so your Mac remembers its password.")
                     .font(Typeface.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Form {
                 TextField("Network name", text: $name)
-                SecureField("Password", text: $password, prompt: Text("Leave empty for an open network"))
             }
             .formStyle(.columns)
             if refused {
-                Text("Couldn't add it. The name may already be on the list or be too long, or the Keychain said no.")
+                Text("Couldn't add it. The name may already be on the list, or be too long.")
                     .font(Typeface.footnote)
                     .foregroundStyle(WindowPalette.accentText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -338,7 +365,7 @@ struct AddNetworkSheet: View {
                 Button("Cancel", action: onClose)
                     .keyboardShortcut(.cancelAction)
                 Button("Add") {
-                    if onAdd(name, password) { onClose() } else { refused = true }
+                    if onAdd(name) { onClose() } else { refused = true }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

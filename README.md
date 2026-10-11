@@ -44,7 +44,7 @@ codex plugin marketplace add Avi130805/monotask
 codex plugin add monotask@monotask
 ```
 
-Then start `codex` in a terminal, run `/hooks`, and approve the six Monotask hooks once.
+Then start `codex` in a terminal, run `/hooks`, and approve the eight Monotask hooks once.
 
 What changes:
 
@@ -60,7 +60,7 @@ The plugin sends your task title and finish line to your agent, and through it t
 
 Off by default. **Lid-Closed Mode…** in the ••• menu opens its window. Switched on, it lets Claude Code and Codex keep working after you close your MacBook's lid, and only while one of them is working. When they finish, your Mac sleeps as usual. Nothing about it appears in the notch.
 
-It knows an agent is working from the plugin's hooks: a prompt or a running tool marks the session busy, the end of its turn marks it idle. In Codex, also approve the two tool hooks (PreToolUse, PostToolUse) in `/hooks`.
+It knows an agent is working from the plugin's hooks: a prompt or a running tool marks the session busy; the end of its turn, a permission prompt, an interrupt or a failed turn marks it idle. A tool counts as running for 30 minutes, or up to an hour while its processes are using the CPU. In Codex, approve all eight hooks in `/hooks`.
 
 **What it installs.** Only an administrator can keep a Mac awake with its lid closed (`pmset -a disablesleep 1`), so the first time you switch it on, Monotask explains why and asks for your password or Touch ID to install a small helper:
 
@@ -72,14 +72,14 @@ Both are plain text in [Sources/Monotask/Core/LidHelper.swift](Sources/Monotask/
 **How it stays safe.**
 
 - The helper turns sleep off only while Monotask keeps renewing a one-minute lease file. If Monotask quits, crashes or hangs, the lease runs out and the Mac sleeps within about a minute.
-- It turns sleep back on whenever it starts (so after a restart), when it's stopped, and when it's removed. It never changes a sleep setting it didn't make, and it stops after 8 hours awake in a row whatever Monotask says.
-- Monotask lets the Mac sleep when the agents finish (2 minutes later, by default), when it gets hot (critical heat always, whatever the setting), when the battery is at or below 25% (you choose, never under 10%), when it's on battery and you haven't allowed that, in Low Power Mode, after 2 hours with the lid closed (30 minutes to 6 hours), or when the internet has been gone for 15 minutes.
-- Once one of those stops it, it stays stopped until you open the lid or the agents are done, so it never flip-flops.
+- It turns sleep back on whenever it starts (so after a restart), when it's stopped, and when it's removed. It never changes a sleep setting it didn't make, and it stops after 8 hours awake in a row whatever Monotask says, until there has been no lease for 10 minutes while the Mac is awake.
+- Monotask lets the Mac sleep when the agents finish (2 minutes later, by default), when it gets hot (critical heat always, whatever the setting), when the battery is at or below 25% (you choose, never under 10%) or its level can't be read, when it's on battery and you haven't allowed that, in Low Power Mode, after 2 hours with the lid closed (30 minutes to 6 hours), or when the internet has been gone for 15 minutes.
+- Once one of those stops it, it stays stopped until you open the lid, even if the agents stop and start again or the Mac wakes for a moment in a bag, so it never flip-flops. A lid that can't be read counts as closed.
 - While an agent works your Mac doesn't sleep at all, lid open or closed: the setting has to be on before the lid closes.
 
 A closed MacBook can't cool itself well, especially in a bag. Give it some air.
 
-**If the internet drops** (off by default, *Find a working network if the internet drops*): with the lid closed, Monotask waits for macOS to reconnect, turns Wi-Fi off and on once, then tries the fallback networks you listed, in your order, with their passwords in your Keychain. It makes at most 3 attempts in 10 minutes and 6 in an hour, waits longer before retrying a network each time it fails, and gives up after 15 minutes offline, which lets the Mac sleep. To fall back to your iPhone, turn on Personal Hotspot's *Allow Others to Join*, and set *Ask to join hotspots* to *Automatic* in your Mac's Wi-Fi settings.
+**If the internet drops** (off by default, *Find a working network if the internet drops*): with the lid closed, Monotask waits for macOS to reconnect, turns Wi-Fi off and on once, then tries the fallback networks you listed, in your order. Monotask keeps no Wi-Fi passwords: it joins with the one macOS saved, so join each fallback network once from the Wi-Fi menu first. A network macOS has no password for is skipped, and the window says so. It makes at most 3 attempts in 10 minutes and 6 in an hour, waits longer before retrying a network each time it fails, and gives up after 15 minutes offline, which lets the Mac sleep. To fall back to your iPhone, turn on Personal Hotspot's *Allow Others to Join*, and set *Ask to join hotspots* to *Automatic* in your Mac's Wi-Fi settings.
 
 **Removing it.** *Remove Helper…* in the window, or by hand:
 

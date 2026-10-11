@@ -11,6 +11,7 @@
   "license": "MIT",
   "keywords": ["monotask", "focus", "todo", "macos", "notch", "do-now"],
   "skills": "./skills/",
+  "hooks": "./hooks/codex.json",
   "interface": {
     "displayName": "Monotask",
     "shortDescription": "Your agent knows the one task you're on",
