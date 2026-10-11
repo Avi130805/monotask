@@ -18,7 +18,7 @@ def take_env(project):
         "MONOTASK_HOME": "/work/monotask-home",
         "PS1": "\\[\\e[1;36m\\]~/%s\\[\\e[0m\\] \\[\\e[35m\\]❯\\[\\e[0m\\] " % project,
         "PROMPT_COMMAND": "", "BASH_SILENCE_DEPRECATION_WARNING": "1",
-        "DISABLE_AUTOUPDATER": "1",
+        "DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
     })
     return env
 

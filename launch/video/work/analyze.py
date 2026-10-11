@@ -13,11 +13,14 @@ for p in sorted(glob.glob(os.path.join(SRC, "*.png"))):
     alpha = a[:, :, 3]
     ys, xs = np.where(alpha > 250)
     x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
-    # corner radius estimate: on the bottom row, how far in the body starts
-    row = np.where(alpha[y1 - 1] > 128)[0]
-    out["frames"][name] = {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0,
-                           "bottomInset": int(row.min() - x0) if len(row) else 0,
-                           "size": [a.shape[1], a.shape[0]]}
+    # The body proper (without the top ear flares): its extent at mid height.
+    mid = np.where(alpha[(y0 + y1) // 2] > 250)[0]
+    bx0, bx1 = int(mid.min()), int(mid.max()) + 1
+    # Bottom corner radius, estimated from how far in the last row starts.
+    row = np.where(alpha[y1 - 1] > 250)[0]
+    radius = round((int(row.min()) - bx0) * 1.1)
+    out["frames"][name] = {"x": bx0, "y": y0, "w": bx1 - bx0, "h": y1 - y0, "r": radius,
+                           "bbox": [x0, y0, x1 - x0, y1 - y0], "size": [a.shape[1], a.shape[0]]}
 a = np.array(Image.open(os.path.join(SRC, "v12a-holding-start.png")).convert("RGBA")).astype(int)
 b = np.array(Image.open(os.path.join(SRC, "v12b-holding-full.png")).convert("RGBA")).astype(int)
 d = np.abs(a - b).sum(axis=2) > 24
@@ -27,5 +30,5 @@ out["hold"] = {"x": int(xs.min()), "y": int(ys.min()), "w": int(xs.max() - xs.mi
 os.makedirs(os.path.join(HERE, "film"), exist_ok=True)
 json.dump(out, open(os.path.join(HERE, "film", "notch.json"), "w"), indent=1)
 for k, v in out["frames"].items():
-    print(f"{k:24s} {v['x']:5d} {v['y']:4d} {v['w']:5d} {v['h']:5d} inset={v['bottomInset']}")
+    print(f"{k:24s} {v['x']:5d} {v['y']:4d} {v['w']:5d} {v['h']:5d} r={v['r']}")
 print("hold", out["hold"])

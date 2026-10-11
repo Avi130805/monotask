@@ -4,3 +4,4 @@ work/frames/
 work/tmp/
 *.log
 out/check/*.tmp
+__pycache__/
