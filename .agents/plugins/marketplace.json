@@ -1,0 +1,20 @@
+{
+  "name": "monotask",
+  "interface": {
+    "displayName": "Monotask"
+  },
+  "plugins": [
+    {
+      "name": "monotask",
+      "source": {
+        "source": "local",
+        "path": "./plugins/monotask"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

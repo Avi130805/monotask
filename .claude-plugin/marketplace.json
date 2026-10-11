@@ -1,0 +1,16 @@
+{
+  "name": "monotask",
+  "owner": {
+    "name": "Avinash"
+  },
+  "metadata": {
+    "description": "Monotask for coding agents."
+  },
+  "plugins": [
+    {
+      "name": "monotask",
+      "source": "./plugins/monotask",
+      "description": "Your coding agent knows the one task you are on (Monotask's Do Now) and what done means, and can park side work in your Do Next once you say yes."
+    }
+  ]
+}
