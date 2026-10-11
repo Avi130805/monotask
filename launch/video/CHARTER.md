@@ -12,7 +12,8 @@ Render, from real material only:
 
 | Output | Spec |
 |---|---|
-| `launch/video/out/monotask-guide.mp4` | 1920×1080, 30 fps, H.264 High, yuv420p, `-movflags +faststart`, CRF ≈ 18, silent, 60–80 s, under 80 MB |
+| `launch/video/out/monotask-guide.mp4` | the full guide (storyboard below): 1920×1080, 30 fps, H.264 High, yuv420p, `-movflags +faststart`, CRF ≈ 18, silent, 60–80 s, under 80 MB |
+| `launch/video/out/monotask-short.mp4` | the feed cut for Reddit and X: same specs, 28–35 s, under 40 MB (see "Short cut" below) |
 | `launch/video/out/poster.png` | 1920×1080 still from beat 7 (the Done moment) |
 | `launch/video/out/readme.gif` | ≤ 8 MB, 960 px wide, 6–9 s loop of beat 5 (Claude Code + notch), 15 fps, good palette |
 | `launch/video/out/BEATS.md` | the final timing table (beat, start, end, captions, sources), plus which recording take was used and why |
@@ -105,7 +106,7 @@ Write only inside `launch/video/` (and temp folders outside the repo). Never edi
 
 | # | Time | What we see | Caption |
 |---|---|---|---|
-| 1 | 0–4 s | Desktop, idle notch (v01). A slow push toward the notch. The wordmark "Monotask" with "One task at a time. Your coding agents know it too." fades in at centre, then out as the push lands. | none |
+| 1 | 0–4 s | Cold open on the payoff, no logo intro: the notch with its chin showing the task and finish line (v09), close-up, on the desktop. A slow pull back as the caption lands. | One task. One finish line. Your coding agents know both. |
 | 2 | 4–11 s | ⌥Space keycaps; the notch morphs into the capture bar (v02); typing v03a → v03b → v03; Return keycap; it collapses to v04 (green "Added to Do Next"). | **1 · CAPTURE**: ⌥Space from any app. Type it, press Return. It waits in Do Next. |
 | 3 | 11–21 s | The cursor clicks the notch, giving the open panel (v05). It hovers the row (v05b) and clicks start, giving the start form (v06a → v06b → v06). Return, then v07. | **2 · START ONE TASK**: Write what done means. That's your finish line. |
 | 4 | 21–25 s | The panel closes to v08 (dot and timer). The cursor rests on the notch, giving v09 (chin). | It sits in your notch. Hover to see the task and its finish line. |
@@ -113,6 +114,17 @@ Write only inside `launch/video/` (and temp folders outside the repo). Never edi
 | 6 | 45–55 s | The second terminal (R2, Codex in `blog/`) slides in from the right. The real session plays. (Or the no-key card.) | **4 · CODEX TOO**: Same task in every project. Wander off and it tells you once, then helps. |
 | 7 | 55–64 s | The terminals glide away. The cursor clicks the notch (v11) and presses the hold button. The camera pushes in on the button: v12a, then the capsule fill grows linearly over 1.1 s to v12b. A 3-frame pause, then the spring to v13 (green "Done"), then v14 ("1 done this week"). | **5 · ONLY YOU FINISH IT**: Hold to mark it done, once it's done end to end. |
 | 8 | 64–72 s | The notch closes to v01 and the camera pulls back. The end card fades in over the desktop: "Monotask", "Free and open source · MIT", then three lines in monospace: `github.com/Avi130805/monotask`, `/plugin marketplace add Avi130805/monotask`, `codex plugin marketplace add Avi130805/monotask`. Final image: the quiet notch and the card. | none |
+
+### Short cut (`monotask-short.mp4`, 28–35 s)
+
+Feed viewers decide in the first second, with the sound off. Use the same material, re-cut:
+- 0–3 s: the v09 chin close-up (task and finish line). Caption: "One task. One finish line. Your coding agents know both."
+- 3–16 s: R1 condensed: the request, the scoped fix, the finish-line status line (push in), the offer to park the flaky test, "yes", the permission prompt, v10. Captions: "Claude Code gets your task and finish line." then "Side work waits in Do Next. Only with your yes."
+- 16–21 s: R2's heads-up line (or skip it if there's no key). Caption: "Codex too. Wander off and it tells you once."
+- 21–29 s: the hold, then Done (v12a, the fill, v13, v14). Caption: "Only you mark it done."
+- 29–33 s: the end card.
+
+Captions stay at 2 lines and about 45 characters a line at most. No em dashes anywhere on screen.
 
 Rhythm: beats 2–4 are brisk (2–3 s per step). Beat 5 breathes (the reply is the point). Beat 7 holds its pause before the Done; the pause matters more than speed. Every shot does a job: it shows a step, a consequence, or the agent behaving.
 
@@ -124,10 +136,10 @@ Write `launch/video/setup.sh` (idempotent; it runs as root on Ubuntu 24.04 with 
 
 1. `ffprobe` on the MP4 reports 1920×1080, 30 fps, H.264, the duration and the size. Paste it into the ledger.
 2. Extract one frame from the middle of every beat into `launch/video/out/check/` and **look at each one**. Check that captions are readable, nothing is clipped, the notch is centred, and the terminal text is sharp.
-3. The GIF is ≤ 8 MB and loops cleanly.
+3. The GIF is ≤ 8 MB and loops cleanly. The short cut is 28–35 s and opens on the payoff frame.
 4. `BEATS.md` lists the takes used. If any take misses a behaviour from R1 or R2, say exactly what is missing.
 5. `git diff --stat origin/work/main...HEAD` touches only `launch/video/`.
 
 ## FINISH LINE
 
-The MP4, poster, GIF and BEATS.md are committed and pushed on your lane branch, and every proof step has been recorded in the ledger. Large binaries are fine (each under 90 MB). Don't commit `node_modules` or Chromium: add a `.gitignore` inside `launch/video/`.
+Both MP4s, the poster, the GIF and BEATS.md are committed and pushed on your lane branch, and every proof step has been recorded in the ledger. Large binaries are fine (each under 90 MB). Don't commit `node_modules` or Chromium: add a `.gitignore` inside `launch/video/`.
