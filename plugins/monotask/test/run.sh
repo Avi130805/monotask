@@ -331,21 +331,77 @@ CLAUDE_CODE_REMOTE=true; MONOTASK_HOME="$T/nonexistent"; export CLAUDE_CODE_REMO
 hook pre-tool "$(tool_json cloud)"
 if is_empty "$OUT" && [ $RC -eq 0 ] && [ ! -e "$T/nonexistent" ]; then pass "tool hooks stay silent in cloud sessions"; else fail "tool hooks stay silent in cloud sessions"; fi
 
-# ------------------------------------------------------------------------------------------ hooks.json
+# Waiting for the user (a permission prompt, an interrupt, a failed turn): the agent isn't working, so the marker
+# goes idle. It fires on the fast path, like the tool hooks, and prints nothing (Codex rejects text from Interrupt).
+reset
+CLAUDECODE=1; export CLAUDECODE
+hook prompt-submit "$(prompt_json w1)" >/dev/null
+hook pre-tool "$(tool_json w1 '{"command":"rm -rf build"}')"
+hook waiting '{"session_id":"w1","transcript_path":"/x","cwd":"/x","hook_event_name":"Notification","message":"Claude needs your permission to use Bash","notification_type":"permission_prompt"}'
+if grep -Eq '^idle [0-9]+ claude$' "$T/home/agents/w1" 2>/dev/null && is_empty "$OUT" && [ $RC -eq 0 ]; then
+  pass "waiting (a permission prompt) writes 'idle <epoch> claude', silently"
+else
+  fail "waiting (a permission prompt) writes 'idle <epoch> claude', silently" "rc=$RC out=$OUT marker=$(cat "$T/home/agents/w1" 2>/dev/null)"
+fi
+hook waiting '{"session_id":"w3","hook_event_name":"StopFailure","error":"rate_limit"}'
+if [ ! -e "$T/plug/sessions/w3" ] && grep -Eq '^idle [0-9]+ claude$' "$T/home/agents/w3" 2>/dev/null; then pass "waiting (StopFailure) keeps no session state of its own"; else fail "waiting (StopFailure) keeps no session state of its own"; fi
+reset
+PLUGIN_DATA="$T/plug"; export PLUGIN_DATA
+hook pre-tool "$(tool_json w2)"
+hook waiting "$(printf '{"session_id":"w2","turn_id":"t","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"%s"}}' "$BIG")"
+if grep -Eq '^idle [0-9]+ codex$' "$T/home/agents/w2" 2>/dev/null && is_empty "$OUT"; then pass "waiting (Codex PermissionRequest, big input) writes 'idle <epoch> codex'"; else fail "waiting (Codex PermissionRequest, big input) writes 'idle <epoch> codex'" "$(cat "$T/home/agents/w2" 2>/dev/null)"; fi
+hook waiting '{"session_id":"w2","turn_id":"t","hook_event_name":"Interrupt","permission_mode":"default"}'
+if grep -Eq '^idle [0-9]+ codex$' "$T/home/agents/w2" 2>/dev/null && is_empty "$OUT" && [ $RC -eq 0 ]; then pass "waiting (Codex Interrupt) prints nothing and exits 0"; else fail "waiting (Codex Interrupt) prints nothing and exits 0"; fi
+reset
+hook waiting '{"hook_event_name":"Notification"}'
+if [ $RC -eq 0 ] && is_empty "$OUT" && [ "$(count_files "$T/home/agents")" = "0" ]; then pass "waiting without a session id writes nothing"; else fail "waiting without a session id writes nothing"; fi
 
-# Every event runs the same handler. Codex trusts hooks by a hash of each entry, so the four older ones must stay as
-# they were; these lines are exactly what they have always been.
+# ------------------------------------------------------------------------------------------ hooks files
+
+# Claude Code reads hooks/hooks.json; Codex reads .codex-plugin/plugin.json, whose "hooks" path replaces that default
+# with hooks/codex.json. The six older commands stay byte for byte what they have always been, in both files (Codex
+# hashes each entry; it also keys its approvals by file, so moving them asks Codex users to approve them once more).
 HOOKS="$HERE/../hooks/hooks.json"
-for pair in SessionStart:session-start UserPromptSubmit:prompt-submit Stop:stop SessionEnd:session-end PreToolUse:pre-tool PostToolUse:post-tool; do
-  name="${pair%%:*}"; ev="${pair#*:}"
-  line="            \"command\": \"\\\"\${CLAUDE_PLUGIN_ROOT}/bin/monotask\\\" hook $ev || true\","
-  if grep -q "^    \"$name\": \[\$" "$HOOKS" && [ "$(grep -cF "$line" "$HOOKS")" = "1" ]; then
-    pass "hooks.json: $name runs 'hook $ev' with the shared handler"
+CODEX_HOOKS="$HERE/../hooks/codex.json"
+CMD_PREFIX='            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/monotask\" hook '
+hook_line() { printf '%s%s || true",' "$CMD_PREFIX" "$1"; }
+has_event() { grep -q "^    \"$2\": \[\$" "$1"; }
+for file in "$HOOKS" "$CODEX_HOOKS"; do
+  label="$(basename "$file")"
+  for pair in SessionStart:session-start UserPromptSubmit:prompt-submit Stop:stop SessionEnd:session-end PreToolUse:pre-tool PostToolUse:post-tool; do
+    name="${pair%%:*}"; ev="${pair#*:}"
+    if has_event "$file" "$name" && [ "$(grep -cF "$(hook_line "$ev")" "$file")" = "1" ]; then
+      pass "$label: $name runs 'hook $ev', byte for byte as before"
+    else
+      fail "$label: $name runs 'hook $ev', byte for byte as before" "$(hook_line "$ev")"
+    fi
+  done
+  if [ "$(grep -c '"type": "command",$' "$file")" = "8" ] && [ "$(grep -cF "$(hook_line waiting)" "$file")" = "2" ]; then
+    pass "$label: eight command hooks, two of them 'hook waiting'"
   else
-    fail "hooks.json: $name runs 'hook $ev' with the shared handler" "$line"
+    fail "$label: eight command hooks, two of them 'hook waiting'"
+  fi
+  if command -v plutil >/dev/null 2>&1; then
+    if plutil -convert json -o /dev/null "$file" 2>/dev/null; then pass "$label is valid JSON"; else fail "$label is valid JSON"; fi
   fi
 done
-if [ "$(grep -c '"timeout": 5$' "$HOOKS")" = "6" ] && [ "$(grep -c '"type": "command",$' "$HOOKS")" = "6" ]; then pass "hooks.json: six command hooks, 5 s timeout each"; else fail "hooks.json: six command hooks, 5 s timeout each"; fi
+if has_event "$HOOKS" Notification && has_event "$HOOKS" StopFailure && grep -q '"matcher": "permission_prompt|idle_prompt",$' "$HOOKS" \
+  && ! has_event "$HOOKS" PermissionRequest && ! has_event "$HOOKS" Interrupt && [ "$(grep -c '"timeout": 5$' "$HOOKS")" = "8" ]; then
+  pass "hooks.json (Claude Code): Notification (permission_prompt|idle_prompt) and StopFailure mean waiting; no Codex-only events"
+else
+  fail "hooks.json (Claude Code): Notification (permission_prompt|idle_prompt) and StopFailure mean waiting; no Codex-only events"
+fi
+if has_event "$CODEX_HOOKS" PermissionRequest && has_event "$CODEX_HOOKS" Interrupt && ! has_event "$CODEX_HOOKS" Notification \
+  && ! has_event "$CODEX_HOOKS" StopFailure && [ "$(grep -c '"timeout": 5$' "$CODEX_HOOKS")" = "7" ] && [ "$(grep -c '"timeout": 3$' "$CODEX_HOOKS")" = "1" ]; then
+  pass "codex.json (Codex): PermissionRequest and Interrupt (3 s, its limit) mean waiting; no Claude-only events"
+else
+  fail "codex.json (Codex): PermissionRequest and Interrupt (3 s, its limit) mean waiting; no Claude-only events"
+fi
+if grep -q '^  "hooks": "./hooks/codex.json",$' "$HERE/../.codex-plugin/plugin.json" && ! grep -q '"hooks"' "$HERE/../.claude-plugin/plugin.json"; then
+  pass "Codex's manifest points at hooks/codex.json; Claude Code's keeps the default hooks/hooks.json"
+else
+  fail "Codex's manifest points at hooks/codex.json; Claude Code's keeps the default hooks/hooks.json"
+fi
 
 # ------------------------------------------------------------------------------------------ add
 
@@ -482,9 +538,9 @@ reset
 CLAUDECODE=1; export CLAUDECODE
 RUNS=10
 # Tool hooks fire around every tool call, so they get the tighter budget.
-for ev in session-start prompt-submit stop session-end pre-tool post-tool; do
+for ev in session-start prompt-submit stop session-end pre-tool post-tool waiting; do
   case "$ev" in
-    pre-tool|post-tool) input="$(tool_json timing '{"command":"npm test"}')"; budget=50 ;;
+    pre-tool|post-tool|waiting) input="$(tool_json timing '{"command":"npm test"}')"; budget=50 ;;
     *) input="$(start_json timing startup)"; budget=100 ;;
   esac
   t0="$(now_ms)"

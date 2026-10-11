@@ -4,7 +4,7 @@
 #   monotask now                 print the user's current Do Now (what the app wrote to agent-context.md)
 #   monotask add "<title>"       queue an item for the user's Do Next
 #   monotask hook <event>        host hook entry point
-#                                (session-start | prompt-submit | pre-tool | post-tool | stop | session-end)
+#                                (session-start | prompt-submit | pre-tool | post-tool | waiting | stop | session-end)
 #   monotask --version | help
 #
 # Information only flows into agents: nothing here starts, changes or finishes the Do Now.
@@ -240,7 +240,7 @@ cmd_hook() {
   fi
 
   case "$event" in
-    pre-tool|post-tool)
+    pre-tool|post-tool|waiting)
       tool_marker "$event" "$data/agents"
       return 0
       ;;
@@ -326,7 +326,8 @@ remember() {
 # Activity marker for lid-closed mode ("keep agents running with the lid closed"); skipped without a data folder.
 #   busy <epoch> <host>   a prompt was submitted, or a tool just finished: the agent is thinking
 #   tool <epoch> <host>   a tool is running (a long build or test run fires nothing until it ends)
-#   idle <epoch> <host>   the agent finished its turn
+#   idle <epoch> <host>   the agent finished its turn, or is waiting for the user (a permission prompt, an interrupt,
+#                         a turn that failed)
 marker() {
   [ -d "$(data_dir)" ] && [ -w "$(data_dir)" ] || return 0
   mkdir -p "$1" 2>/dev/null || return 0
@@ -334,7 +335,9 @@ marker() {
 }
 
 # PreToolUse and PostToolUse fire around every tool call, so they do the least they can: the session id is at the
-# start of the input, and the rest (a tool's arguments or output, possibly large) is drained unread.
+# start of the input, and the rest (a tool's arguments or output, possibly large) is drained unread. "waiting" (a
+# permission prompt, an interrupt, a failed turn) takes the same path and prints nothing: Codex rejects plain text
+# from Interrupt hooks.
 tool_marker() {
   sid=""
   if [ ! -t 0 ]; then
@@ -342,7 +345,11 @@ tool_marker() {
     cat >/dev/null 2>&1
   fi
   [ -n "$sid" ] || return 0
-  if [ "$1" = "pre-tool" ]; then kind=tool; else kind=busy; fi
+  case "$1" in
+    pre-tool) kind=tool ;;
+    waiting) kind=idle ;;
+    *) kind=busy ;;
+  esac
   marker "$2" "$sid" "$kind" "$(hook_host)"
 }
 

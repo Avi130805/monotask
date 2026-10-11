@@ -44,7 +44,7 @@ codex plugin marketplace add Avi130805/monotask
 codex plugin add monotask@monotask
 ```
 
-Then start `codex` in a terminal, run `/hooks`, and approve the six Monotask hooks once.
+Then start `codex` in a terminal, run `/hooks`, and approve the eight Monotask hooks once.
 
 What changes:
 
@@ -60,7 +60,7 @@ The plugin sends your task title and finish line to your agent, and through it t
 
 Off by default. **Lid-Closed Mode…** in the ••• menu opens its window. Switched on, it lets Claude Code and Codex keep working after you close your MacBook's lid, and only while one of them is working. When they finish, your Mac sleeps as usual. Nothing about it appears in the notch.
 
-It knows an agent is working from the plugin's hooks: a prompt or a running tool marks the session busy, the end of its turn marks it idle. In Codex, also approve the two tool hooks (PreToolUse, PostToolUse) in `/hooks`.
+It knows an agent is working from the plugin's hooks: a prompt or a running tool marks the session busy; the end of its turn, a permission prompt, an interrupt or a failed turn marks it idle. A tool counts as running for 30 minutes, or up to an hour while its processes are using the CPU. In Codex, approve all eight hooks in `/hooks`.
 
 **What it installs.** Only an administrator can keep a Mac awake with its lid closed (`pmset -a disablesleep 1`), so the first time you switch it on, Monotask explains why and asks for your password or Touch ID to install a small helper:
 

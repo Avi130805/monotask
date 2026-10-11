@@ -708,7 +708,51 @@ extension SelfTest {
             AgentActivity.isWorking(AgentActivity.Marker(kind: kind, at: now.addingTimeInterval(-secondsAgo), host: "claude"), now: now)
         }
         check(working(.busy, 9 * 60) && !working(.busy, 11 * 60), "busy counts as working for 10 minutes")
-        check(working(.tool, 59 * 60) && !working(.tool, 61 * 60), "a running tool counts as working for an hour")
+        check(working(.tool, 29 * 60) && !working(.tool, 31 * 60),
+              "a running tool counts as working for 30 minutes on its own (it may be a permission prompt nobody answers)")
+        check(AgentActivity.isWorking(AgentActivity.Marker(kind: .tool, at: now.addingTimeInterval(-59 * 60), host: "claude"), now: now, toolsBusy: true)
+              && !AgentActivity.isWorking(AgentActivity.Marker(kind: .tool, at: now.addingTimeInterval(-61 * 60), host: "claude"), now: now, toolsBusy: true),
+              "…and for up to an hour while the agents' child processes use the CPU")
+        check(AgentActivity.cpuSeconds("0:01.23") == 1.23 && AgentActivity.cpuSeconds("95:17.19") == 95 * 60 + 17.19
+              && AgentActivity.cpuSeconds("1:02:03") == 3_723 && AgentActivity.cpuSeconds("2-00:00:01.50") == 172_801.5
+              && AgentActivity.cpuSeconds("abc") == nil && AgentActivity.cpuSeconds("12") == nil && AgentActivity.cpuSeconds("1:-2") == nil,
+              "ps's CPU times are read: mm:ss.cc, hh:mm:ss and dd-hh:mm:ss")
+        let table = """
+            1     0  95:17.19 /sbin/launchd
+          100     1   1:00.00 /Users/a/.local/bin/claude --resume
+          200   100   0:00.10 /bin/zsh -c make test
+          300   200   2:00.00 /usr/bin/make test
+          400     1   9:00.00 /usr/bin/unrelated
+          500     1   0:30.00 codex
+          600   500   0:05.00 /bin/bash -lc cargo build
+          700     1   0:20.00 node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js
+          800   700   0:01.00 /usr/bin/python3 tests.py
+          900     1   0:01.00 /Applications/Claude.app/Contents/MacOS/Claude
+          950   900   0:09.00 /usr/bin/helper
+        garbage line
+        """
+        let children = AgentActivity.agentChildrenCPU(processTable: table)
+        check(children == [200: 0.1, 300: 120, 600: 5, 800: 1],
+              "the agents' child processes are found under claude, codex and node-run Claude Code, leaving the agents and everything else out")
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let before = AgentActivity.ProcessSample(at: t0, cpu: [300: 120])
+        check(AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 5, cpu: [300: 120.5]))
+              && AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 5, cpu: [300: 120, 301: 0.3])),
+              "a child that used CPU since the last look, or a new one that has, is evidence of work")
+        check(!AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 5, cpu: [300: 120.05]))
+              && !AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 5, cpu: [:]))
+              && !AgentActivity.toolsBusy(before: before, after: AgentActivity.ProcessSample(at: t0 + 60, cpu: [300: 200]))
+              && !AgentActivity.toolsBusy(before: nil, after: before) && !AgentActivity.toolsBusy(before: before, after: nil),
+              "idle children, no children, samples too far apart or a missing sample are not")
+        check(AgentActivity.sampleProcesses(now: t0, run: { path, arguments, _ in
+                  path == "/bin/ps" && arguments == ["-A", "-o", "pid=,ppid=,time=,args="] ? (0, Data(table.utf8)) : nil
+              })?.cpu == children && AgentActivity.sampleProcesses(now: t0, run: { _, _, _ in nil }) == nil,
+              "a sample comes from /bin/ps -A -o pid=,ppid=,time=,args=; ps failing gives none")
+        let slowStart = Date()
+        check(AgentActivity.capture("/bin/sleep", ["5"], timeout: 0.5) == nil && Date().timeIntervalSince(slowStart) < 2.5,
+              "a command that hangs is killed after its timeout and counts as unknown")
+        check(AgentActivity.capture("/bin/echo", ["hi"], timeout: 3).map { $0.status == 0 && $0.output == Data("hi\n".utf8) } == true,
+              "a quick command's status and output come back")
         check(!working(.idle, 1) && !working(.idle, 0), "idle never counts as working")
         check(!working(.busy, -10 * 60) && working(.busy, -60), "a marker far in the future is ignored; a little clock skew isn't")
 
@@ -716,7 +760,8 @@ extension SelfTest {
         try? files.createDirectory(at: scratch, withIntermediateDirectories: true)
         func put(_ name: String, _ text: String) { try? Data(text.utf8).write(to: scratch.appendingPathComponent(name)) }
         put("a", "busy \(at(30)) claude\n")
-        put("b", "tool \(at(30 * 60)) codex\n")
+        put("b", "tool \(at(20 * 60)) codex\n")
+        put("f", "tool \(at(40 * 60)) claude\n")
         put("c", "idle \(at(10)) claude\n")
         put("d", "garbage")
         put("e", "busy \(at(3_600)) claude\n")
@@ -727,8 +772,10 @@ extension SelfTest {
         mkfifo(pipe.path, 0o600)
         let started = Date()
         let summary = AgentActivity.summarize(folder: scratch, now: now)
-        check(summary.working == 2 && summary.sessions == 4 && summary.hosts == ["claude": 1, "codex": 1],
+        check(summary.working == 2 && summary.sessions == 5 && summary.hosts == ["claude": 1, "codex": 1] && summary.longTools == 1,
               "a folder of markers counts the working sessions; dot-files, links, oversized files and garbage are skipped")
+        check(AgentActivity.summarize(folder: scratch, now: now, toolsBusy: true).working == 3,
+              "with CPU evidence, a tool running for 40 minutes counts too")
         check(Date().timeIntervalSince(started) < 2, "a named pipe among the markers doesn't block the scan")
         check(AgentActivity.summarize(folder: scratch, now: now, agentsAlive: false).working == 0,
               "with no Claude Code or Codex process left, every marker expires early")

@@ -66,6 +66,8 @@ final class LidController {
     @ObservationIgnored private var leaseExpiry: Date?
     @ObservationIgnored private var activity = AgentActivity.Summary()
     @ObservationIgnored private var scanning = false
+    /// The last look at the agents' child processes, for telling a long build from a permission prompt.
+    @ObservationIgnored private var processSample: AgentActivity.ProcessSample?
     @ObservationIgnored private var failover: Failover
     @ObservationIgnored private var passwordCache: [String: String] = [:]
     @ObservationIgnored private var wifiDevice: String?
@@ -180,14 +182,25 @@ final class LidController {
         scanning = true
         let folder = agentsFolder
         let now = machine.now()
+        let previous = processSample
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var summary = AgentActivity.summarize(folder: folder, now: now)
+            // A tool running for over 25 minutes: look at the agents' child processes, and let it count for the full hour
+            // only if they used the CPU since the last look (a build, not a permission prompt nobody answers).
+            var sample: AgentActivity.ProcessSample?
+            if summary.longTools > 0 {
+                sample = AgentActivity.sampleProcesses(now: now)
+                if AgentActivity.toolsBusy(before: previous, after: sample) {
+                    summary = AgentActivity.summarize(folder: folder, now: now, toolsBusy: true)
+                }
+            }
             // Only when something claims to be working: is any agent process left at all?
             if summary.working > 0, AgentActivity.agentProcessesAlive() == false {
                 summary = AgentActivity.summarize(folder: folder, now: now, agentsAlive: false)
             }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
+                    self?.processSample = sample
                     self?.scanning = false
                     self?.evaluate(activity: summary)
                 }
