@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Exercises the Do Now / Do Next rules, the event history, the insight maths, the prompter's markup and timing
 /// and the coding-agent bridge against throwaway files. Run with `Monotask --selftest`.
@@ -111,6 +111,12 @@ enum SelfTest {
 
         print("Moving from Next")
         checkMigration(check, scratch: folder.appendingPathComponent("migration", isDirectory: true), list: stateURL)
+
+        print("Notch windows")
+        check(NotchController.isMenuWindow(level: .popUpMenu), "a pop-up menu window is a menu")
+        check(!NotchController.isMenuWindow(level: .normal) && !NotchController.isMenuWindow(level: .floating)
+              && !NotchController.isMenuWindow(level: .mainMenu + 3) && !NotchController.isMenuWindow(level: nil),
+              "Insights, the script editor, the panel itself and no window at all are not menus")
 
         print(failures == 0 ? "All checks passed." : "\(failures) check(s) failed.")
         return failures == 0

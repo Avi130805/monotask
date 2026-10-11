@@ -302,7 +302,9 @@ final class NotchController {
     }
 
     private func installMonitors() {
-        let mouse: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown, .rightMouseDown]
+        // Releases are included only so the pass-through is recomputed: it skips events while a button is down, so
+        // without them a press or drag that ends outside the body would leave the window swallowing (or ignoring) clicks.
+        let mouse: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown, .rightMouseDown, .leftMouseUp, .rightMouseUp]
         if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mouse, handler: { [weak self] event in
             MainActor.assumeIsolated {
                 self?.updateMousePassThrough()
@@ -317,9 +319,10 @@ final class NotchController {
                 if event.type == .keyDown { return self.handleKey(event) }
                 // Wherever the event was headed, the pointer's position decides whether the window takes the next click.
                 self.updateMousePassThrough()
-                // Menus run their own tracking in their own windows; ignore those while the panel is open. Collapsed,
+                // Menus run their own tracking in their own windows; ignore those while the panel is open. A click in any
+                // other Monotask window (Insights, the script editor) is an outside click and closes the panel. Collapsed,
                 // only the position matters: with Insights in front, the pointer's moves can be reported to that window.
-                if event.window == nil || event.window === self.panel || !self.model.mode.isExpanded {
+                if !Self.isMenuWindow(level: event.window?.level) || !self.model.mode.isExpanded {
                     self.handleMouse(event)
                 }
                 return false
@@ -331,6 +334,14 @@ final class NotchController {
         followBody()
     }
 
+    /// Menus (the settings menu, context menus) live in windows at the pop-up menu level, above everything else
+    /// Monotask shows. No window means the event isn't for a window of ours at all, which is not a menu.
+    nonisolated static func isMenuWindow(level: NSWindow.Level?) -> Bool {
+        guard let level else { return false }
+        return level.rawValue >= NSWindow.Level.popUpMenu.rawValue
+    }
+
+    /// Only presses and moves drive opening and closing; releases arrive just to refresh the pass-through.
     private func handleMouse(_ event: NSEvent) {
         switch event.type {
         case .mouseMoved, .leftMouseDragged: mouseMoved()
