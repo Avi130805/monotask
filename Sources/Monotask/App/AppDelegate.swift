@@ -4,6 +4,8 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: Store?
     private var notch: NotchController?
+    private var agentBridge: AgentBridge?
+    private var agentInbox: AgentInbox?
     private var hotKey: HotKey?
     private var prompterHotKey: HotKey?
 
@@ -24,6 +26,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.store = store
         self.notch = notch
         notch.start()
+
+        // Coding agents read Do Now from a text file beside the list and add to Do Next through an inbox folder.
+        let bridge = AgentBridge(store: store, folder: store.folder)
+        let inbox = AgentInbox(store: store, folder: store.folder) { [weak notch] position in
+            notch?.announceAdded(position: position)
+        }
+        self.agentBridge = bridge
+        self.agentInbox = inbox
+        bridge.start()
+        inbox.start()
 
         hotKey = HotKey.registerFirstAvailable(HotKey.defaults) { [weak notch] in
             notch?.toggleCapture()

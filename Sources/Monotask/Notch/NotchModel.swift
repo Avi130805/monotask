@@ -71,6 +71,11 @@ final class NotchModel {
     var prompterHotKeyLabel = ""
     var focusCaptureToken = 0
 
+    /// Snapshot-only: pose the hold button mid-hold or completed, instead of its own press state.
+    var posedHold: (progress: CGFloat, completed: Bool)?
+    /// Snapshot-only: draw this Do Next row as if the pointer were on it.
+    var posedHoverID: UUID?
+
     /// Set after the pointer has rested on the notch for a moment, so a quick brush past only swells it.
     var peekDetail = false
 

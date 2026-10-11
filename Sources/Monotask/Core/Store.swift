@@ -13,6 +13,11 @@ final class Store {
     @ObservationIgnored private let fileURL: URL
     @ObservationIgnored private let eventsURL: URL
     @ObservationIgnored private var pendingSave: DispatchWorkItem?
+    /// Called with the new state after every change, so things that mirror it (the agent bridge) stay current.
+    @ObservationIgnored var onChange: ((AppState) -> Void)?
+
+    /// The folder holding the state file, which is also where its companions (events, agent context, inbox) live.
+    var folder: URL { fileURL.deletingLastPathComponent() }
 
     /// `eventsURL` defaults to `events.jsonl` beside the state file.
     init(fileURL: URL = Store.defaultFileURL, eventsURL: URL? = nil) {
@@ -196,6 +201,7 @@ final class Store {
         guard copy != state else { return }
         state = copy
         scheduleSave()
+        onChange?(state)
     }
 
     private func record(_ kind: TaskEvent.Kind, _ item: TaskItem, at date: Date, note: String? = nil, related: UUID? = nil) {
@@ -251,6 +257,12 @@ final class Store {
     /// Whether `data` is a list this app (or Next before it) saved.
     nonisolated static func isStateFile(_ data: Data) -> Bool {
         (try? decoder.decode(AppState.self, from: data)) != nil
+    }
+
+    /// Reads a saved list without opening a Store (used by `--agent-context`). Nil if it isn't one.
+    nonisolated static func readState(at url: URL) -> AppState? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? decoder.decode(AppState.self, from: data)
     }
 
     private static func load(from url: URL) -> AppState {

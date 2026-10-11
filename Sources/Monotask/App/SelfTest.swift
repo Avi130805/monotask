@@ -1,7 +1,7 @@
 import Foundation
 
-/// Exercises the Do Now / Do Next rules, the event history, the insight maths and the prompter's markup and timing
-/// against throwaway files. Run with `Monotask --selftest`.
+/// Exercises the Do Now / Do Next rules, the event history, the insight maths, the prompter's markup and timing
+/// and the coding-agent bridge against throwaway files. Run with `Monotask --selftest`.
 @MainActor
 enum SelfTest {
     static func run() -> Bool {
@@ -106,11 +106,142 @@ enum SelfTest {
               && (try? Data(contentsOf: stateURL)) == listBefore && (try? Data(contentsOf: eventsURL)) == historyBefore,
               "prompting never touches the list or the event history, so it can't count as a task or reach Insights")
 
+        print("Coding agents")
+        checkAgents(check, scratch: folder.appendingPathComponent("agents", isDirectory: true))
+
         print("Moving from Next")
         checkMigration(check, scratch: folder.appendingPathComponent("migration", isDirectory: true), list: stateURL)
 
         print(failures == 0 ? "All checks passed." : "\(failures) check(s) failed.")
         return failures == 0
+    }
+
+    /// What coding agents see (the context text and its file) and what they can send back (the inbox).
+    private static func checkAgents(_ check: (Bool, String) -> Void, scratch: URL) {
+        let files = FileManager.default
+        try? files.createDirectory(at: scratch, withIntermediateDirectories: true)
+        func makeStore(_ name: String) -> Store {
+            Store(fileURL: scratch.appendingPathComponent("\(name).json"), eventsURL: scratch.appendingPathComponent("\(name)-events.jsonl"))
+        }
+
+        // The text itself.
+        let context = makeStore("context")
+        check(AgentContext.text(for: context.state) == nil, "agents are told nothing while Do Now is empty")
+        context.capture("Fix login redirect")
+        context.start(context.next[0].id, doneWhen: "Google sign-in lands on the dashboard, in production")
+        let golden = """
+        Monotask is the user's one-task-at-a-time app. Their current task (their Do Now) is the same in every project and folder:
+
+        Task: Fix login redirect
+        Done when: Google sign-in lands on the dashboard, in production
+
+        How the user works with it:
+        - Requests that serve this task are part of it. Anything else is separate work: the user likes a one-line heads-up that it isn't their Do Now, then the help they asked for.
+        - Done means the line above is met end to end. The user likes a plain answer on whether it is met yet, and what is left.
+        - Only the user marks a task done, in Monotask.
+        - Side work noticed along the way stays out of the current change. With the user's yes, it can go on their Do Next list.
+
+        """
+        check(AgentContext.text(for: context.state) == golden, "the agent context is exactly the agreed text")
+
+        // The file that carries it.
+        let bridged = makeStore("bridge")
+        let bridge = AgentBridge(store: bridged, folder: scratch)
+        let contextFile = scratch.appendingPathComponent(AgentBridge.fileName)
+        bridge.start()
+        check(!files.fileExists(atPath: contextFile.path), "no agent-context file while Do Now is empty")
+        bridged.capture("Ship the pricing page")
+        bridged.capture("Reply to client")
+        bridged.start(bridged.next[0].id, doneWhen: "Live on prod")
+        let text = { try? String(contentsOf: contextFile, encoding: .utf8) }
+        check(text() == AgentContext.text(for: bridged.state) && text()?.contains("Task: Ship the pricing page") == true,
+              "the file appears when something is started")
+        let writes = bridge.writes
+        let modified = (try? files.attributesOfItem(atPath: contextFile.path))?[.modificationDate] as? Date
+        bridged.capture("Fix flaky test")
+        bridged.moveToTop(bridged.next[1].id)
+        check(bridge.writes == writes
+              && (try? files.attributesOfItem(atPath: contextFile.path))?[.modificationDate] as? Date == modified,
+              "changes to Do Next don't rewrite the file")
+        bridged.split(firstPiece: "Draft the copy", doneWhen: "Copy approved")
+        check(text()?.contains("Task: Draft the copy") == true && text()?.contains("Done when: Copy approved") == true
+              && bridge.writes == writes + 1, "a split updates the file with the new piece and its finish line")
+        bridged.finish()
+        check(!files.fileExists(atPath: contextFile.path), "the file goes away when Do Now is finished")
+
+        let running = makeStore("running")
+        running.capture("Already underway")
+        running.start(running.next[0].id, doneWhen: "Done and checked")
+        let startupFolder = scratch.appendingPathComponent("startup", isDirectory: true)
+        let startup = AgentBridge(store: running, folder: startupFolder)
+        startup.start()
+        check((try? String(contentsOf: startupFolder.appendingPathComponent(AgentBridge.fileName), encoding: .utf8))
+              == AgentContext.text(for: running.state) && startup.writes == 1, "the file is written at launch when Do Now is already filled")
+
+        // The inbox.
+        let inboxStore = makeStore("inbox")
+        inboxStore.capture("Existing item")
+        inboxStore.capture("Current task")
+        inboxStore.start(inboxStore.next[1].id, doneWhen: "Shipped")
+        var announced: [Int] = []
+        let inbox = AgentInbox(store: inboxStore, folder: scratch.appendingPathComponent("inboxes", isDirectory: true)) {
+            announced.append($0)
+        }
+        try? files.createDirectory(at: inbox.folder, withIntermediateDirectories: true)
+        func drop(_ name: String, _ content: String) {
+            try? Data(content.utf8).write(to: inbox.folder.appendingPathComponent(name))
+        }
+        func waiting() -> [String] { ((try? files.contentsOfDirectory(atPath: inbox.folder.path)) ?? []).sorted() }
+        let eventsBefore = inboxStore.events.filter { $0.kind == .captured }.count
+
+        drop("001-valid.txt", "  Add retry to the webhook  \nignored second line")
+        check(inbox.scan() == 1 && inboxStore.next.last?.title == "Add retry to the webhook" && waiting().isEmpty,
+              "a valid inbox file is imported by its first line and deleted")
+        check(inboxStore.events.filter { $0.kind == .captured }.count == eventsBefore + 1
+              && inboxStore.events.last?.kind == .captured && inboxStore.events.last?.title == "Add retry to the webhook",
+              "an import records a captured event")
+        check(announced == [inboxStore.next.count], "an import reports where the item landed")
+
+        let before = inboxStore.next.count
+        drop("002-blank.txt", "  \n \n")
+        drop("003-dup.txt", "  EXISTING item ")
+        drop("004-now.txt", "current TASK")
+        drop("005-again.txt", "add retry to the webhook")
+        check(inbox.scan() == 0 && inboxStore.next.count == before && waiting().isEmpty && announced.count == 1,
+              "blank files and duplicates of Do Next or Do Now are deleted without adding anything")
+
+        drop(".006-half.txt", "Still being written")
+        drop("007-note.md", "Not a txt file")
+        inbox.scan()
+        check(waiting() == [".006-half.txt", "007-note.md"] && !inboxStore.next.contains { $0.title == "Still being written" },
+              "dot files and other file types are left alone")
+        try? files.removeItem(at: inbox.folder.appendingPathComponent(".006-half.txt"))
+        try? files.removeItem(at: inbox.folder.appendingPathComponent("007-note.md"))
+
+        drop("010-long.txt", String(repeating: "word ", count: 80))
+        inbox.scan()
+        let long = inboxStore.next.last?.title ?? ""
+        check(long.count <= AgentInbox.maxTitleLength && long.count > 150 && long.hasSuffix("word") && !long.hasSuffix(" "),
+              "an over-long title is cut to 200 characters at a word boundary")
+        drop("011-solid.txt", String(repeating: "x", count: 300))
+        inbox.scan()
+        check(inboxStore.next.last?.title.count == AgentInbox.maxTitleLength, "a title with no spaces is cut at exactly 200")
+
+        drop("022-second.txt", "Second in line")
+        drop("021-first.txt", "First in line")
+        drop("023-third.txt", "Third in line")
+        let count = inboxStore.next.count
+        inbox.scan()
+        check(inboxStore.next.suffix(from: count).map(\.title) == ["First in line", "Second in line", "Third in line"]
+              && announced.last == inboxStore.next.count, "several files are imported in name order")
+
+        inbox.start()
+        let temporary = inbox.folder.appendingPathComponent(".tmp-live")
+        try? Data("Added while watching".utf8).write(to: temporary)
+        try? files.moveItem(at: temporary, to: inbox.folder.appendingPathComponent("100-live.txt"))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        check(inboxStore.next.last?.title == "Added while watching" && waiting().isEmpty,
+              "a file renamed into the folder is picked up by the watcher")
     }
 
     private static func checkMigration(_ check: (Bool, String) -> Void, scratch: URL, list: URL) {
