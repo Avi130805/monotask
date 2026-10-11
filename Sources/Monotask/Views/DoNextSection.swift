@@ -88,6 +88,7 @@ struct NextRow: View {
     @FocusState var focus: FieldID?
 
     private var isEditing: Bool { model.editingID == item.id }
+    private var isHovered: Bool { hovering || model.posedHoverID == item.id }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -115,7 +116,7 @@ struct NextRow: View {
                 BlockedTag(reason: reason)
             }
 
-            if hovering && !isEditing {
+            if isHovered && !isEditing {
                 HStack(spacing: 2) {
                     if index > 0 {
                         IconButton("arrow.up", help: "Move up") {
@@ -133,7 +134,7 @@ struct NextRow: View {
         .frame(height: Layout.rowHeight)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(hovering || isEditing ? Palette.cardHover : .clear)
+                .fill(isHovered || isEditing ? Palette.cardHover : .clear)
         )
         .contentShape(Rectangle())
         .onHover { inside in

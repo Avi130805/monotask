@@ -104,12 +104,113 @@ enum Snapshots {
         app.run()
     }
 
-    private static func host<V: View>(_ view: V, size: CGSize) -> (NSView, NSWindow) {
+    // MARK: Launch video
+
+    /// `Monotask --snapshot <folder> --scenario video`: the notch alone, on a transparent background, in the order
+    /// the launch video tells its story. Every frame is the same 860 x 600 canvas with the notch at top centre,
+    /// so the video can lay them over its own desktop without re-aligning. Uses throwaway data like `run`.
+    static func runVideo(into folder: URL) {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        let files = FileManager.default
+        try? files.createDirectory(at: folder, withIntermediateDirectories: true)
+        let scratch = files.temporaryDirectory.appendingPathComponent("monotask-snapshot-\(UUID().uuidString)", isDirectory: true)
+        try? files.createDirectory(at: scratch, withIntermediateDirectories: true)
+
+        let store = Store(fileURL: scratch.appendingPathComponent("notch.json"),
+                          eventsURL: scratch.appendingPathComponent("notch-events.jsonl"))
+        store.capture("Write the launch post")
+        store.capture("Reply to Sam about pricing")
+        let model = NotchModel()
+        model.notchSize = CGSize(width: 185, height: 33.5)
+        model.hotKeyLabel = "⌥Space"
+        let prompter = Prompter(fileURL: scratch.appendingPathComponent("prompter.txt"), defaults: nil)
+        let (notch, window) = host(NotchRootView(store: store, model: model, prompter: prompter),
+                                   size: CGSize(width: 860, height: 600), transparent: true)
+
+        let task = "Fix login redirect"
+        let finishLine = "Google sign-in lands on the dashboard, in production"
+        func added() -> Flash { Flash(symbol: "checkmark", text: "Added to Do Next", tint: Palette.done) }
+        func startTask() {
+            if let item = store.next.first(where: { $0.title == task }) { store.start(item.id, doneWhen: finishLine) }
+        }
+
+        let steps: [(String, () -> Void)] = [
+            ("v01-closed-idle", { model.mode = .closed }),
+            ("v02-capture-empty", { model.mode = .capture }),
+            ("v03a-capture-typing-1", { model.drafts.capture = "Fix log" }),
+            ("v03b-capture-typing-2", { model.drafts.capture = "Fix login red" }),
+            ("v03-capture-typed", { model.drafts.capture = task }),
+            ("v04-flash-added", {
+                store.capture(task)
+                model.drafts.capture = ""
+                model.mode = .closed
+                model.flash = added()
+            }),
+            ("v05-open-list", { model.flash = nil; model.mode = .open }),
+            ("v05b-open-row-hover", { model.posedHoverID = store.next.first { $0.title == task }?.id }),
+            // Open the form empty first, so the field isn't caught with its text selected the way a freshly focused field is.
+            ("", {
+                model.posedHoverID = nil
+                // Set directly rather than through `tryStart`: its spring would leave the title and the row mid-morph.
+                model.form = store.next.first(where: { $0.title == task }).map { .start($0.id) }
+                model.drafts.doneWhen = ""
+            }),
+            ("v06a-start-form-typing-1", { model.drafts.doneWhen = "Google sign-in lands" }),
+            ("v06b-start-form-typing-2", { model.drafts.doneWhen = "Google sign-in lands on the dashboard" }),
+            ("v06-start-form", { model.drafts.doneWhen = finishLine }),
+            ("v07-open-now", { startTask(); model.form = nil; model.drafts.doneWhen = "" }),
+            ("v08-closed-wings", { model.mode = .closed }),
+            ("v09-peek-chin", { model.mode = .peek; model.peekDetail = true }),
+            ("v10-flash-added-side", {
+                store.capture("Fix flaky auth test")
+                model.peekDetail = false
+                model.mode = .closed
+                model.flash = added()
+            }),
+            ("v11-open-side-task", { model.flash = nil; model.mode = .open }),
+            ("v12-holding", { model.isHolding = true; model.posedHold = (0.6, false) }),
+            ("v13-done", { model.posedHold = (1, true) }),
+            ("v14-open-finished", { model.posedHold = nil; model.isHolding = false; store.finish() }),
+        ]
+
+        var written: [String] = []
+        var index = 0
+        func step() {
+            guard index < steps.count else {
+                try? files.removeItem(at: scratch)
+                window.close()
+                print("Wrote \(written.count) snapshots to \(folder.path):")
+                written.forEach { print("  \($0)") }
+                NSApp.terminate(nil)
+                return
+            }
+            let (name, change) = steps[index]
+            index += 1
+            change()
+            DispatchQueue.main.asyncAfter(deadline: .now() + (name.isEmpty ? 0.6 : 1.0)) {
+                if !name.isEmpty {
+                    let url = folder.appendingPathComponent("\(name).png")
+                    capture(notch, to: url)
+                    written.append(url.path)
+                }
+                step()
+            }
+        }
+        DispatchQueue.main.async { step() }
+        app.run()
+    }
+
+    private static func host<V: View>(_ view: V, size: CGSize, transparent: Bool = false) -> (NSView, NSWindow) {
         let host = NSHostingView(rootView: view)
         host.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: CGRect(x: -9000, y: -9000, width: size.width, height: size.height),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        if transparent {
+            window.isOpaque = false
+            window.backgroundColor = .clear
+        }
         window.contentView = host
         window.orderFrontRegardless()
         return (host, window)
