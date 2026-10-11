@@ -1832,6 +1832,15 @@ extension SelfTest {
         controller.evaluate(activity: one)
         check(leaseText() != nil, "a lease deleted from outside is written again")
 
+        clock += 20
+        controller.evaluate()
+        check(controller.working == 1, "between scans the last scan's count stands")
+        clock += 11
+        controller.evaluate()
+        check(controller.working == 0 && controller.decision.reason == .finishing,
+              "a scan over 30 s old counts as nobody working, so a hung scan can't keep the Mac awake")
+        controller.evaluate(activity: one)
+
         clock += 60
         controller.evaluate(activity: none)
         check(controller.decision.reason == .finishing && leaseText() != nil, "agents just finished: still awake for the grace period")

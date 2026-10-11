@@ -73,6 +73,9 @@ final class LidController {
     /// seconds of the lease going.
     @ObservationIgnored private var leaseReleasedAt: Date?
     @ObservationIgnored private var activity = AgentActivity.Summary()
+    /// When `activity` was counted. A count older than `activityStaleAfter` (a scan that hung) means nobody is working.
+    @ObservationIgnored private var activityAt: Date?
+    static let activityStaleAfter: TimeInterval = 30
     @ObservationIgnored private var scanning = false
     /// The last look at the agents' child processes, for telling a long build from a permission prompt.
     @ObservationIgnored private var processSample: AgentActivity.ProcessSample?
@@ -211,20 +214,23 @@ final class LidController {
                 MainActor.assumeIsolated {
                     self?.processSample = sample
                     self?.scanning = false
-                    self?.evaluate(activity: summary)
+                    self?.evaluate(activity: summary, countedAt: now)
                 }
             }
         }
     }
 
     /// Decides with the last known agent activity.
-    func evaluate() { evaluate(activity: activity) }
+    func evaluate() { evaluate(activity: activity, countedAt: activityAt ?? .distantPast) }
 
-    /// One decision: sensors in, lease and failover out.
-    func evaluate(activity summary: AgentActivity.Summary) {
+    /// One decision: sensors in, lease and failover out. `countedAt` is when the activity was counted (now, if not
+    /// given); a count over 30 s old (a scan that hung, or took that long) counts as nobody working.
+    func evaluate(activity counted: AgentActivity.Summary, countedAt: Date? = nil) {
         let now = machine.now()
         let settings = self.settings
-        activity = summary
+        activity = counted
+        activityAt = countedAt ?? now
+        let summary = now.timeIntervalSince(countedAt ?? now) <= Self.activityStaleAfter ? counted : AgentActivity.Summary()
         if working != summary.working { working = summary.working }
 
         // The helper.
