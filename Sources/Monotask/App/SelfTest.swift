@@ -1615,7 +1615,7 @@ extension SelfTest {
             }
             return words
         }
-        let allowed: Set<String> = ["set", "umask", "if", "[", "true", "fi", "/bin/launchctl", "/bin/mkdir", "/usr/sbin/chown",
+        let allowed: Set<String> = ["set", "umask", "if", "[", "true", "fi", "exit", "/bin/launchctl", "/bin/mkdir", "/usr/sbin/chown",
                                     "/bin/chmod", "/bin/echo", "/usr/bin/base64", "/bin/mv", "/bin/rm", "/bin/rmdir",
                                     "/usr/bin/pmset"]
         let installCommands = commands(shell)
@@ -1669,9 +1669,65 @@ extension SelfTest {
         let uninstall = LidHelper.uninstallScript
         check(uninstall.contains("/bin/launchctl bootout system/\(LidHelper.label)")
               && uninstall.contains("/bin/rm -f \(LidHelper.plistPath) \(LidHelper.helperPath)")
-              && uninstall.contains("if [ -e '\(LidHelper.ownedPath)' ]; then /usr/bin/pmset -a disablesleep 0; fi")
+              && uninstall.contains("if [ -e '\(LidHelper.ownedPath)' ]; then /usr/bin/pmset -a disablesleep 0 || exit 1; fi")
               && !uninstall.contains("disablesleep 1") && !visible.contains("disablesleep"),
               "removing stops the job, deletes both files and turns sleep back on only if Monotask turned it off")
+
+        // The uninstaller, run for real against a scratch copy of every path it names, with a fake pmset.
+        let sandbox = FileManager.default.temporaryDirectory.appendingPathComponent("monotask-uninstall-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+        let fakeState = sandbox.appendingPathComponent("state", isDirectory: true)
+        try? FileManager.default.createDirectory(at: fakeState, withIntermediateDirectories: true)
+        let fakePmset = sandbox.appendingPathComponent("pmset")
+        try? """
+        #!/bin/sh
+        echo "$*" >>'\(sandbox.path)/pmset.log'
+        [ -e '\(sandbox.path)/pmset-fails' ] && exit 1
+        exit 0
+
+        """.write(to: fakePmset, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakePmset.path)
+        let sandboxed = uninstall
+            .replacingOccurrences(of: "/bin/launchctl", with: "/usr/bin/true")
+            .replacingOccurrences(of: LidHelper.helperStaging, with: sandbox.path + "/helper.new")
+            .replacingOccurrences(of: LidHelper.plistStaging, with: sandbox.path + "/plist.new")
+            .replacingOccurrences(of: LidHelper.helperPath, with: sandbox.path + "/helper")
+            .replacingOccurrences(of: LidHelper.plistPath, with: sandbox.path + "/plist")
+            .replacingOccurrences(of: LidHelper.stateFolder, with: fakeState.path)
+            .replacingOccurrences(of: "/usr/bin/pmset", with: fakePmset.path)
+        /// Runs the sandboxed uninstaller with a marker (or not) and pmset failing (or not): its exit status, and what's left.
+        func uninstallRun(owned: Bool, pmsetFails: Bool) -> (status: Int32, ownedLeft: Bool, pmset: String)? {
+            guard !sandboxed.contains("/Library/"), !sandboxed.contains("launchctl"), !sandboxed.contains("/usr/bin/pmset"),
+                  sandbox.path.hasPrefix(FileManager.default.temporaryDirectory.path) else { return nil }
+            try? FileManager.default.createDirectory(at: fakeState, withIntermediateDirectories: true)
+            let marker = fakeState.appendingPathComponent("lid-owned")
+            if owned { try? Data("1800000000\n".utf8).write(to: marker) } else { try? FileManager.default.removeItem(at: marker) }
+            try? Data("alive 1 sleepDisabled=1 owned=1 reason=lease\n".utf8).write(to: fakeState.appendingPathComponent("lid-status"))
+            let fails = sandbox.appendingPathComponent("pmset-fails")
+            if pmsetFails { try? Data().write(to: fails) } else { try? FileManager.default.removeItem(at: fails) }
+            try? FileManager.default.removeItem(at: sandbox.appendingPathComponent("pmset.log"))
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", sandboxed]
+            process.environment = ["PATH": "/usr/bin:/bin"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            do { try process.run() } catch { return nil }
+            process.waitUntilExit()
+            let log = (try? String(contentsOf: sandbox.appendingPathComponent("pmset.log"), encoding: .utf8)) ?? ""
+            return (process.terminationStatus, FileManager.default.fileExists(atPath: marker.path), log)
+        }
+        let failed = uninstallRun(owned: true, pmsetFails: true)
+        check(failed != nil && failed?.status != 0 && failed?.ownedLeft == true,
+              "removing: if turning sleep back on fails, the uninstaller fails and keeps the marker, so it can be retried")
+        let worked = uninstallRun(owned: true, pmsetFails: false)
+        check(worked?.status == 0 && worked?.ownedLeft == false && worked?.pmset == "-a disablesleep 0\n",
+              "removing: with Monotask's marker, sleep is turned back on, then the state files go")
+        let untouched = uninstallRun(owned: false, pmsetFails: true)
+        check(untouched?.status == 0 && untouched?.pmset == "", "removing: without the marker, the sleep setting isn't touched")
+        check(LidController.uninstallFailureText(message: "x", sleepStillOff: true).contains("sudo pmset -a disablesleep 0")
+              && LidController.uninstallFailureText(message: "denied", sleepStillOff: false) == "denied",
+              "a failed removal that left sleep off says so, and how to fix it by hand")
 
         // Status lines.
         check(LidHelper.parseStatus("alive 1800000000 sleepDisabled=1 owned=1 reason=lease\n")

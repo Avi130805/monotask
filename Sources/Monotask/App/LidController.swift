@@ -552,11 +552,21 @@ final class LidController {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.work = nil
-                    if case .failed(let message) = result { self.report("Couldn't remove the lid helper", message) }
+                    if case .failed(let message) = result {
+                        let stillOff = self.machine.ownedMarkerExists() && self.machine.sleepDisabled() == true
+                        self.report("Couldn't remove the lid helper", Self.uninstallFailureText(message: message, sleepStillOff: stillOff))
+                    }
                     self.tick()
                 }
             }
         }
+    }
+
+    /// What a failed removal says. If sleep is still off with Monotask's marker, the helper's files are gone but the
+    /// setting isn't back: say so plainly, with the fix.
+    static func uninstallFailureText(message: String, sleepStillOff: Bool) -> String {
+        guard sleepStillOff else { return message }
+        return "The helper was removed, but turning sleep back on failed, so your Mac may not sleep. Try Let It Sleep again, or run `sudo pmset -a disablesleep 0` in Terminal."
     }
 
     private func report(_ title: String, _ message: String) {

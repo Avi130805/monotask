@@ -367,11 +367,12 @@ done
     }
 
     /// What runs as root to remove it all. Stopping the job makes the helper turn sleep back on; the marker check
-    /// catches a helper that was already gone.
+    /// catches a helper that was already gone. If turning sleep back on fails, it stops there with the marker kept
+    /// (and fails, so the window says so), so trying again still knows the setting is Monotask's to undo.
     static let uninstallScript = """
     /bin/launchctl bootout system/\(label) 2>/dev/null || true
     /bin/rm -f \(plistPath) \(helperPath) \(helperStaging) \(plistStaging)
-    if [ -e '\(ownedPath)' ]; then /usr/bin/pmset -a disablesleep 0; fi
+    if [ -e '\(ownedPath)' ]; then /usr/bin/pmset -a disablesleep 0 || exit 1; fi
     /bin/rm -f '\(stateFolder)/'lid-* '\(stateFolder)/'.lid-*
     /bin/rmdir '\(stateFolder)' 2>/dev/null || true
     """
