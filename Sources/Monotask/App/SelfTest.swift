@@ -177,6 +177,16 @@ enum SelfTest {
         startup.start()
         check((try? String(contentsOf: startupFolder.appendingPathComponent(AgentBridge.fileName), encoding: .utf8))
               == AgentContext.text(for: running.state) && startup.writes == 1, "the file is written at launch when Do Now is already filled")
+        startup.stop()
+        check(!files.fileExists(atPath: startupFolder.appendingPathComponent(AgentBridge.fileName).path),
+              "quitting removes the agent context file")
+        running.capture("Added after quitting")
+        check(!files.fileExists(atPath: startupFolder.appendingPathComponent(AgentBridge.fileName).path),
+              "a stopped bridge doesn't write the file again")
+        let relaunched = AgentBridge(store: running, folder: startupFolder)
+        relaunched.start()
+        check((try? String(contentsOf: startupFolder.appendingPathComponent(AgentBridge.fileName), encoding: .utf8))
+              == AgentContext.text(for: running.state), "the next launch writes the file again")
 
         // The inbox.
         let inboxStore = makeStore("inbox")
