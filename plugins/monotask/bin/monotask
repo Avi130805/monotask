@@ -28,7 +28,33 @@ tmp_root() {
   printf '%s' "${t%/}"
 }
 
-# Absolute path of this script, for the "add" command line shown to hosts that don't put bin/ on PATH.
+# Where the app watches for items from agents that can't write into its data folder. The app reads
+# NSTemporaryDirectory(), which is the per-user DARWIN_USER_TEMP_DIR, not necessarily this process's $TMPDIR
+# (a sandboxed Bash tool gets its own). MONOTASK_SPOOL overrides it (tests); without getconf's answer (Linux)
+# the plain temp folder is the best guess.
+spool_dir() {
+  if [ -n "${MONOTASK_SPOOL:-}" ]; then
+    printf '%s' "${MONOTASK_SPOOL%/}"
+    return
+  fi
+  d="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)"
+  if [ -n "$d" ]; then
+    printf '%s/monotask-inbox' "${d%/}"
+  else
+    printf '%s/monotask-inbox' "$(tmp_root)"
+  fi
+}
+
+# True unless we can positively tell that the Monotask app isn't running. Without pgrep, a data folder is the best sign.
+app_running() {
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -x Monotask >/dev/null 2>&1
+  else
+    [ -d "$(data_dir)" ]
+  fi
+}
+
+# Absolute path of this script, for the "add" command line shown to every host (bin/ isn't guaranteed on PATH).
 self_path() {
   p="$0"
   case "$p" in
@@ -120,9 +146,9 @@ cmd_add() {
     if queue_into "$inbox" "$title"; then done_in="inbox"; fi
   fi
 
-  # Sandboxed agents (Codex's default) can't write into Application Support; their TMPDIR is writable.
+  # Sandboxed agents (Codex's default) can't write into Application Support; the user's temp folder is writable.
   if [ -z "$done_in" ]; then
-    spool="$(tmp_root)/monotask-inbox"
+    spool="$(spool_dir)"
     if [ ! -d "$spool" ]; then
       (umask 077 && mkdir -p "$spool") 2>/dev/null
     fi
@@ -132,14 +158,14 @@ cmd_add() {
   fi
 
   if [ -z "$done_in" ]; then
-    echo "monotask: couldn't queue the item (no writable inbox folder)." >&2
+    echo "monotask: Couldn't reach Monotask from here; ask the user to add it with ⌥Space." >&2
     return 1
   fi
 
-  if [ ! -d "$data" ]; then
-    echo "Queued for the user's Do Next: $title (Monotask isn't set up on this machine yet; it will appear when Monotask runs)."
-  else
+  if app_running; then
     echo "Added to the user's Do Next: $title"
+  else
+    echo "Queued for the user's Do Next: $title (Monotask isn't running; it will appear when Monotask runs)."
   fi
   return 0
 }
@@ -184,18 +210,16 @@ load_context() {
 
 print_context() {
   printf '%s\n' "$CTX_BODY"
-  if [ -n "${CLAUDECODE:-}" ]; then
-    cmd="monotask"
-  else
-    cmd="\"$(self_path)\""
-  fi
-  printf '%s\n' "Command that adds an item to the user's Do Next (they agree first): $cmd add \"<short title>\""
+  # Always the quoted absolute path: it works in every host, and bin/ isn't on PATH in all of them.
+  printf '%s\n' "Command that adds an item to the user's Do Next (they agree first): \"$(self_path)\" add \"<short title>\""
 }
 
 EMPTY_NOTICE="Monotask update: the user's Do Now is empty now, so the earlier task is no longer in progress."
 
+# Codex sets PLUGIN_DATA for plugin hooks; Claude Code doesn't. CLAUDECODE can't tell them apart: Codex started
+# from a Claude Code session inherits it.
 hook_host() {
-  if [ -n "${CLAUDECODE:-}" ]; then echo claude; else echo codex; fi
+  if [ -n "${PLUGIN_DATA:-}" ]; then echo codex; else echo claude; fi
 }
 
 cmd_hook() {
@@ -232,6 +256,9 @@ cmd_hook() {
           print_context
         fi
       elif [ -n "$prev" ] && [ "$prev" != "none" ]; then
+        printf '%s\n' "$EMPTY_NOTICE"
+      elif [ "$source_kind" = "resume" ] && [ -z "$prev" ]; then
+        # A resumed conversation we have no record of may still hold the old task; tell it that it's gone.
         printf '%s\n' "$EMPTY_NOTICE"
       fi
       if [ -n "$sid" ]; then
