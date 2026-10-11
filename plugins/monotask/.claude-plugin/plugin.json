@@ -1,0 +1,12 @@
+{
+  "name": "monotask",
+  "version": "1.0.0",
+  "description": "Your coding agent knows the one task you are on (Monotask's Do Now) and what done means, and can park side work in your Do Next once you say yes.",
+  "author": {
+    "name": "Avinash"
+  },
+  "homepage": "https://github.com/Avi130805/monotask",
+  "repository": "https://github.com/Avi130805/monotask",
+  "license": "MIT",
+  "keywords": ["monotask", "focus", "todo", "macos", "notch", "do-now"]
+}

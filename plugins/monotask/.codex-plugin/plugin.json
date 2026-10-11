@@ -1,0 +1,24 @@
+{
+  "name": "monotask",
+  "version": "1.0.0",
+  "description": "Your coding agent knows the one task you are on (Monotask's Do Now) and what done means, and can park side work in your Do Next once you say yes.",
+  "author": {
+    "name": "Avinash",
+    "url": "https://github.com/Avi130805"
+  },
+  "homepage": "https://github.com/Avi130805/monotask",
+  "repository": "https://github.com/Avi130805/monotask",
+  "license": "MIT",
+  "keywords": ["monotask", "focus", "todo", "macos", "notch", "do-now"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Monotask",
+    "shortDescription": "Your agent knows the one task you're on",
+    "longDescription": "Tells your coding agent your current Monotask task and what done means, lets it park side work in your Do Next after you agree, and reports when it is working. It never starts, changes or finishes your task.",
+    "developerName": "Avinash",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/Avi130805/monotask",
+    "defaultPrompt": ["What is my current Monotask task, and what does done mean?"]
+  }
+}
