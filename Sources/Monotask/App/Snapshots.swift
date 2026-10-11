@@ -47,7 +47,8 @@ enum Snapshots {
         let lid = LidController(dataFolder: scratch, defaults: lidDefaults, interactive: false)
         let (lidPane, lidWindow) = host(LidSettingsView(controller: lid).defaultAppStorage(lidDefaults),
                                         size: CGSize(width: 560, height: 1_000))
-        let windows = [notchWindow, insightsWindow, pageWindow, editorWindow, lidWindow]
+        let (sheetPane, sheetWindow) = host(AddNetworkSheet(onAdd: { _ in true }, onClose: {}), size: CGSize(width: 400, height: 190))
+        let windows = [notchWindow, insightsWindow, pageWindow, editorWindow, lidWindow, sheetWindow]
         // The first word starting with `text`; a word can carry its punctuation or a dash ("genie —").
         func word(_ text: String) -> (PromptScript.Step) -> Bool { { $0.kind == .word && $0.text.hasPrefix(text) } }
 
@@ -104,6 +105,26 @@ enum Snapshots {
                          fallbacks: ["Studio Wi-Fi", "Avi's iPhone"])
             }),
             ("45-lid-network-dark", lidPane, { lidWindow.appearance = NSAppearance(named: .darkAqua) }),
+            ("46-lid-helper-outdated", lidPane, {
+                lidWindow.appearance = NSAppearance(named: .aqua)
+                lidDefaults.set(false, forKey: Prefs.lidFailover)
+                lid.pose(reason: .helperMissing, helper: .outdated)
+            }),
+            ("47-lid-stuck-helper-failing", lidPane, {
+                lidDefaults.set(false, forKey: Prefs.lidEnabled)
+                lid.pose(reason: .off, helper: .running, stuck: true, helperReason: "error")
+            }),
+            ("48-lid-helper-cap-note", lidPane, {
+                lidDefaults.set(true, forKey: Prefs.lidEnabled)
+                lid.pose(reason: .idle, helper: .running, helperReason: "cap")
+            }),
+            ("49-lid-network-needs-password", lidPane, {
+                lidDefaults.set(true, forKey: Prefs.lidFailover)
+                lid.pose(reason: .working(1), helper: .running, working: 1, awakeFor: 20 * 60,
+                         network: "No internet · Avi's iPhone needs its password saved: join it once from the Wi-Fi menu",
+                         fallbacks: ["Avi's iPhone"], needsPassword: ["Avi's iPhone"])
+            }),
+            ("50-lid-add-network", sheetPane, { sheetWindow.appearance = NSAppearance(named: .aqua) }),
         ]
 
         var index = 0

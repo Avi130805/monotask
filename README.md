@@ -72,9 +72,9 @@ Both are plain text in [Sources/Monotask/Core/LidHelper.swift](Sources/Monotask/
 **How it stays safe.**
 
 - The helper turns sleep off only while Monotask keeps renewing a one-minute lease file. If Monotask quits, crashes or hangs, the lease runs out and the Mac sleeps within about a minute.
-- It turns sleep back on whenever it starts (so after a restart), when it's stopped, and when it's removed. It never changes a sleep setting it didn't make, and it stops after 8 hours awake in a row whatever Monotask says.
-- Monotask lets the Mac sleep when the agents finish (2 minutes later, by default), when it gets hot (critical heat always, whatever the setting), when the battery is at or below 25% (you choose, never under 10%), when it's on battery and you haven't allowed that, in Low Power Mode, after 2 hours with the lid closed (30 minutes to 6 hours), or when the internet has been gone for 15 minutes.
-- Once one of those stops it, it stays stopped until you open the lid or the agents are done, so it never flip-flops.
+- It turns sleep back on whenever it starts (so after a restart), when it's stopped, and when it's removed. It never changes a sleep setting it didn't make, and it stops after 8 hours awake in a row whatever Monotask says, until there has been no lease for 10 minutes while the Mac is awake.
+- Monotask lets the Mac sleep when the agents finish (2 minutes later, by default), when it gets hot (critical heat always, whatever the setting), when the battery is at or below 25% (you choose, never under 10%) or its level can't be read, when it's on battery and you haven't allowed that, in Low Power Mode, after 2 hours with the lid closed (30 minutes to 6 hours), or when the internet has been gone for 15 minutes.
+- Once one of those stops it, it stays stopped until you open the lid, even if the agents stop and start again or the Mac wakes for a moment in a bag, so it never flip-flops. A lid that can't be read counts as closed.
 - While an agent works your Mac doesn't sleep at all, lid open or closed: the setting has to be on before the lid closes.
 
 A closed MacBook can't cool itself well, especially in a bag. Give it some air.

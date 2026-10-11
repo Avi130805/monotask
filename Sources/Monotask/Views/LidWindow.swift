@@ -148,7 +148,7 @@ struct LidSettingsView: View {
                     }
                 } label: {
                     Text("Helper")
-                    Text(Self.helperLine(controller.helperState))
+                    Text(Self.helperLine(controller.helperState, stuck: controller.settingStuck))
                 }
                 Text("A closed MacBook can't cool itself well, especially in a bag. Monotask lets your Mac sleep as soon as agents finish, it gets hot, the battery runs low, the time limit passes, or the internet is gone.")
                     .font(Typeface.footnote)
@@ -167,7 +167,8 @@ struct LidSettingsView: View {
         minutes < 60 ? "\(minutes) min" : minutes == 60 ? "1 hour" : "\(minutes / 60) hours"
     }
 
-    static func helperLine(_ state: LidController.HelperState) -> String {
+    static func helperLine(_ state: LidController.HelperState, stuck: Bool = false) -> String {
+        if stuck && state == .running { return "Running, but it couldn't turn sleep back on" }
         switch state {
         case .missing: return "Not installed"
         case .outdated: return "From another version of Monotask, so it isn't used"
@@ -189,19 +190,20 @@ struct LidStatusRow: View {
                 Image(systemName: symbol)
                     .foregroundStyle(tint)
                     .frame(width: 18)
-                line(at: Date())
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    line(at: Date())
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let note {
+                        Text(note)
+                            .font(Typeface.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Spacer(minLength: 8)
                 if let action {
                     Button(action.title, action: action.run)
                 }
-            }
-            if let note {
-                Text(note)
-                    .font(Typeface.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 26)
             }
         }
     }
