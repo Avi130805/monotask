@@ -170,6 +170,9 @@ enum Snapshots {
             }),
             ("v11-open-side-task", { model.flash = nil; model.mode = .open }),
             ("v12-holding", { model.isHolding = true; model.posedHold = (0.6, false) }),
+            // The two ends of the fill, so the video can grow it exactly as the button does (linear, left to right).
+            ("v12a-holding-start", { model.posedHold = (0.0005, false) }),
+            ("v12b-holding-full", { model.posedHold = (1, false) }),
             ("v13-done", { model.posedHold = (1, true) }),
             ("v14-open-finished", { model.posedHold = nil; model.isHolding = false; store.finish() }),
         ]
