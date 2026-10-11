@@ -15,7 +15,7 @@ struct LogPage: View {
                     model.onOpenInsights()
                 } label: {
                     Label("Insights", systemImage: "chart.bar.xaxis")
-                        .font(.system(size: 11.5, weight: .semibold))
+                        .font(Typeface.footnote.weight(.semibold))
                         .foregroundStyle(Palette.secondary)
                         .contentShape(Rectangle())
                 }
@@ -24,7 +24,7 @@ struct LogPage: View {
             }
             if entries.isEmpty {
                 Text("Tasks you mark done end to end show up here.")
-                    .font(.system(size: 12.5))
+                    .font(Typeface.callout)
                     .foregroundStyle(Palette.secondary)
                     .padding(.vertical, 6)
             } else {
@@ -55,20 +55,21 @@ struct LogRow: View {
                 .foregroundStyle(isDone ? Palette.done : Palette.tertiary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.title)
-                    .font(.system(size: 13))
+                    .font(Typeface.body)
                     .strikethrough(!isDone, color: Palette.tertiary)
                     .foregroundStyle(isDone ? Palette.primary : Palette.tertiary)
                     .lineLimit(1)
                 if let reason = entry.reason {
                     Text(reason)
-                        .font(.system(size: 11.5))
+                        .font(Typeface.footnote)
                         .foregroundStyle(Palette.tertiary)
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 8)
             Text(entry.endedAt, format: .relative(presentation: .named))
-                .font(.system(size: 11.5))
+                .font(Typeface.footnote)
+                .monospacedDigit()
                 .foregroundStyle(Palette.tertiary)
         }
         .padding(.horizontal, 8)

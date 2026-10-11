@@ -16,7 +16,7 @@ struct DoNowSection: View {
                         Image(systemName: "timer")
                         ElapsedText(since: now.startedAt)
                     }
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(Typeface.footnote.weight(.medium))
                     .foregroundStyle(Palette.tertiary)
                     .help("Started \(now.startedAt.formatted(date: .abbreviated, time: .shortened))")
                 }
@@ -27,7 +27,7 @@ struct DoNowSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Palette.card))
-            .modifier(ShakeEffect(shakes: CGFloat(model.shakes)))
+            .modifier(Refusal(shakes: CGFloat(model.shakes)))
         }
     }
 
@@ -67,7 +67,7 @@ struct ActiveNow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(now.item.title)
-                .font(.system(size: 17, weight: .semibold))
+                .font(Typeface.display)
                 .foregroundStyle(Palette.primary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
@@ -81,13 +81,13 @@ struct ActiveNow: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.system(size: 12.5))
+            .font(Typeface.callout)
             .foregroundStyle(model.isHolding ? Palette.accent : Palette.secondary)
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Palette.accent.opacity(model.isHolding ? 0.14 : 0))
+                    .fill(Palette.wash(Palette.accent).opacity(model.isHolding ? 1 : 0))
             )
             .padding(.horizontal, -8)
             .animation(Motion.quick, value: model.isHolding)
@@ -115,7 +115,7 @@ struct CantFinishMenu: View {
             Button(role: .destructive) { show(.drop) } label: { Label("Drop it…", systemImage: "xmark.circle") }
         } label: {
             Text("Can't finish?")
-                .font(.system(size: 12.5, weight: .medium))
+                .font(Typeface.callout.weight(.medium))
                 .foregroundStyle(Palette.secondary)
                 .padding(.horizontal, 4)
                 .frame(height: 34)
@@ -149,13 +149,13 @@ struct StartForm: View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 10) {
             Text(item.title)
-                .font(.system(size: 17, weight: .semibold))
+                .font(Typeface.display)
                 .foregroundStyle(Palette.primary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .matchedGeometryEffect(id: item.id, in: namespace)
             Text("What does done look like? You can only mark it done once this is true.")
-                .font(.system(size: 12))
+                .font(Typeface.subheadline)
                 .foregroundStyle(Palette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             NotchField(prompt: "Merged, deployed, and checked on prod", text: $model.drafts.doneWhen,
@@ -220,14 +220,14 @@ struct ExitForm: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(now.item.title)
-                    .font(.system(size: 12))
+                    .font(Typeface.subheadline)
                     .foregroundStyle(Palette.tertiary)
                     .lineLimit(1)
                 Text(copy.title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(Typeface.title)
                     .foregroundStyle(Palette.primary)
                 Text(copy.detail)
-                    .font(.system(size: 12))
+                    .font(Typeface.subheadline)
                     .foregroundStyle(Palette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -301,10 +301,10 @@ struct EmptyNow: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Nothing in Do Now. Next up:")
-                        .font(.system(size: 12))
+                        .font(Typeface.subheadline)
                         .foregroundStyle(Palette.tertiary)
                     Text(up.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Typeface.title)
                         .foregroundStyle(Palette.primary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -317,12 +317,12 @@ struct EmptyNow: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 Text(store.next.isEmpty ? "Nothing in Do Now" : "Everything in Do Next is blocked")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Typeface.title)
                     .foregroundStyle(Palette.primary)
                 Text(store.next.isEmpty
                      ? "Capture what's on your mind below, then start one thing."
                      : "Start one once it's unblocked, or capture something new.")
-                    .font(.system(size: 12.5))
+                    .font(Typeface.callout)
                     .foregroundStyle(Palette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

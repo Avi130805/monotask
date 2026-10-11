@@ -12,10 +12,10 @@ struct HoldToFinishButton: View {
 
     var body: some View {
         ZStack {
-            Capsule().fill(Color.white.opacity(0.09))
+            Capsule().fill(Palette.raised)
             GeometryReader { geometry in
                 Capsule()
-                    .fill(completed ? Palette.done : Palette.accent.opacity(0.45))
+                    .fill(completed ? Palette.done : Palette.progress(Palette.accent))
                     .frame(width: max(geometry.size.height, geometry.size.width * progress))
                     .opacity(progress > 0.001 || completed ? 1 : 0)
             }
@@ -26,8 +26,8 @@ struct HoldToFinishButton: View {
                 Text(label)
                     .contentTransition(.interpolate)
             }
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(completed ? Color.black : Palette.primary)
+            .font(Typeface.headline)
+            .foregroundStyle(completed ? Palette.onFill : Palette.primary)
         }
         .frame(height: 34)
         .contentShape(Capsule())
@@ -70,13 +70,13 @@ struct HoldToFinishButton: View {
     private func reset() {
         pressedAt = nil
         model.isHolding = false
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { progress = 0 }
+        withAnimation(Motion.content) { progress = 0 }
     }
 
     private func complete() {
         guard !completed else { return }
         Haptics.success()
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+        withAnimation(Motion.pop) {
             completed = true
             progress = 1
         }

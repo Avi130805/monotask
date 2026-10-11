@@ -33,37 +33,38 @@ struct ScriptEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Prompter script")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(Typeface.sheetTitle)
                 Text(summary(script))
-                    .font(.system(size: 12.5))
+                    .font(Typeface.callout)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
                 if let fit = fit(script) {
                     Text(fit)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Palette.accent)
+                        .font(Typeface.callout.weight(.medium))
+                        .foregroundStyle(WindowPalette.accentText)
                 }
             }
 
             TextEditor(text: $draft.text)
-                .font(.system(size: 13.5, design: .monospaced))
+                .font(Typeface.code)
                 .scrollContentBackground(.hidden)
                 .padding(8)
-                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .textBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(WindowPalette.field))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(WindowPalette.fieldStroke))
 
             MarkupLegend()
 
             HStack(spacing: 8) {
                 Button("Restore sample") { draft.text = PromptScript.sample }
                 Text((prompter.fileURL.path as NSString).abbreviatingWithTildeInPath)
-                    .font(.system(size: 11))
+                    .font(Typeface.caption.weight(.regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
                 Spacer(minLength: 8)
                 if draft.isDirty {
-                    Text("Unsaved").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("Unsaved").font(Typeface.subheadline).foregroundStyle(.secondary)
                 }
                 Button("Revert") { draft.text = draft.saved }
                     .disabled(!draft.isDirty)
@@ -76,7 +77,7 @@ struct ScriptEditor: View {
         }
         .padding(20)
         .frame(minWidth: 600, minHeight: 520)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(WindowPalette.window)
     }
 
     private func summary(_ script: PromptScript) -> String {
@@ -117,9 +118,9 @@ struct MarkupLegend: View {
             ForEach(items, id: \.0) { code, meaning in
                 HStack(spacing: 7) {
                     Text(verbatim: code)
-                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .font(Typeface.codeSmall)
                     Text(meaning)
-                        .font(.system(size: 11.5))
+                        .font(Typeface.footnote)
                         .foregroundStyle(.secondary)
                 }
             }

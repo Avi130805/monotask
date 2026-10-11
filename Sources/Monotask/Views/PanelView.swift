@@ -51,9 +51,10 @@ struct HeaderBand: View {
                         .foregroundStyle(model.page == .main ? Palette.done : Palette.secondary)
                         .contentTransition(.symbolEffect(.replace))
                     Text(model.page == .main ? "\(store.finishedThisWeek) done this week" : "Back")
+                        .monospacedDigit()
                         .contentTransition(.numericText())
                 }
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typeface.subheadline.weight(.semibold))
                 .foregroundStyle(Palette.secondary)
                 .contentShape(Rectangle())
             }

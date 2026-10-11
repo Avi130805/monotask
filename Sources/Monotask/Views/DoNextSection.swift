@@ -16,7 +16,7 @@ struct DoNextSection: View {
             SectionLabel("Do Next")
             if visible.isEmpty {
                 Text("Nothing queued.")
-                    .font(.system(size: 12.5))
+                    .font(Typeface.callout)
                     .foregroundStyle(Palette.tertiary)
                     .padding(.horizontal, 8)
                     .frame(height: 28, alignment: .leading)
@@ -52,10 +52,11 @@ struct LaterList: View {
                         .rotationEffect(.degrees(model.showLater ? 90 : 0))
                     Text("Later")
                     Text("\(items.count)")
+                        .monospacedDigit()
                         .foregroundStyle(Palette.tertiary)
                         .contentTransition(.numericText())
                 }
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typeface.subheadline.weight(.semibold))
                 .foregroundStyle(Palette.secondary)
                 .padding(.horizontal, 8)
                 .frame(height: 24)
@@ -92,7 +93,7 @@ struct NextRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Text("\(index + 1)")
-                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .font(Typeface.ordinal)
                 .monospacedDigit()
                 .foregroundStyle(Palette.tertiary)
                 .frame(width: 16, alignment: .trailing)
@@ -101,7 +102,7 @@ struct NextRow: View {
                 editor
             } else {
                 Text(item.title)
-                    .font(.system(size: 13.5))
+                    .font(Typeface.body)
                     .foregroundStyle(item.blockedReason == nil ? Palette.primary : Palette.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -133,7 +134,7 @@ struct NextRow: View {
         .frame(height: Layout.rowHeight)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(hovering || isEditing ? Palette.cardHover : .clear)
+                .fill(Palette.raised.opacity(hovering || isEditing ? 1 : 0))
         )
         .contentShape(Rectangle())
         .onHover { inside in
@@ -146,7 +147,7 @@ struct NextRow: View {
         @Bindable var model = model
         return TextField("", text: $model.drafts.edit)
             .textFieldStyle(.plain)
-            .font(.system(size: 13.5))
+            .font(Typeface.body)
             .foregroundStyle(Palette.primary)
             .focused($focus, equals: .edit)
             .onSubmit(commitEdit)
