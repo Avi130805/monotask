@@ -44,7 +44,7 @@ codex plugin marketplace add Avi130805/monotask
 codex plugin add monotask@monotask
 ```
 
-Then start `codex` in a terminal, run `/hooks`, and approve the four Monotask hooks once.
+Then start `codex` in a terminal, run `/hooks`, and approve the six Monotask hooks once.
 
 What changes:
 
