@@ -20,12 +20,12 @@ final class NotchController {
         return window
     }()
 
-    private enum Pending: Hashable { case peek, detail, hoverOpen, close, shrink, flash }
+    private enum Pending: Hashable { case peek, detail, hoverOpen, close, flash }
 
-    // While closed the window shrinks to a strip, so it never sits over anything it isn't drawing.
+    // The window always has the open panel's size. Resizing a big transparent window costs a frame or more, so
+    // it never happens as a morph starts; while collapsed it lets the mouse through instead (see `updateMousePassThrough`).
     private let windowWidth: CGFloat = 860
-    private let closedWindowHeight: CGFloat = 90
-    private let openWindowHeight: CGFloat = 800
+    private let windowHeight: CGFloat = 800
 
     init(store: Store, prompter: Prompter) {
         self.store = store
@@ -54,11 +54,10 @@ final class NotchController {
     // MARK: Modes
 
     func open() {
-        cancel(.peek, .detail, .hoverOpen, .close, .shrink)
+        cancel(.peek, .detail, .hoverOpen, .close)
         guard model.mode != .open else { return }
         if model.mode == .prompter { prompter.leave() }
         if model.mode == .capture || model.mode == .prompter { releaseKeyboard() }
-        resizeWindow(expanded: true)
         withAnimation(Motion.open) {
             model.mode = .open
             model.peekDetail = false
@@ -77,10 +76,6 @@ final class NotchController {
             model.page = .main
             model.peekDetail = false
         }
-        after(0.7, .shrink) { [weak self] in
-            guard let self, !self.model.mode.isExpanded else { return }
-            self.resizeWindow(expanded: false)
-        }
     }
 
     /// The global shortcut: a quick capture field, or the capture field of the open panel.
@@ -93,8 +88,7 @@ final class NotchController {
             requestKeyboard()
             model.focusCaptureToken += 1
         case .closed, .peek:
-            cancel(.peek, .detail, .hoverOpen, .close, .shrink)
-            resizeWindow(expanded: true)
+            cancel(.peek, .detail, .hoverOpen, .close)
             withAnimation(Motion.open) {
                 model.mode = .capture
                 model.peekDetail = false
@@ -125,11 +119,10 @@ final class NotchController {
 
     /// Puts the script under the camera, counts down, and takes the keyboard so Space, the arrows and Esc reach it.
     func startPrompter() {
-        cancel(.peek, .detail, .hoverOpen, .close, .shrink)
+        cancel(.peek, .detail, .hoverOpen, .close)
         prompter.enter()
         model.editingID = nil
         model.isHolding = false
-        resizeWindow(expanded: true)
         withAnimation(Motion.open) {
             model.mode = .prompter
             model.page = .main
@@ -236,19 +229,17 @@ final class NotchController {
 
     // MARK: Placement
 
+    /// Sizes and centres the window on the notch. It only runs at launch and when the screens change, never as
+    /// part of a morph.
     private func placeOnScreen() {
         guard let screen = NSScreen.notchHost else { return }
         self.screen = screen
         model.notchSize = screen.notchSize
-        resizeWindow(expanded: model.mode.isExpanded)
-    }
-
-    private func resizeWindow(expanded: Bool) {
-        guard let screen else { return }
         let width = min(windowWidth, screen.frame.width)
-        let height = expanded ? min(openWindowHeight, screen.frame.height) : closedWindowHeight
+        let height = min(windowHeight, screen.frame.height)
         let frame = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height)
         if panel.frame != frame { panel.setFrame(frame, display: true) }
+        updateMousePassThrough()
     }
 
     // MARK: Mouse
@@ -279,10 +270,44 @@ final class NotchController {
         panel.isKeyWindow || model.isHolding || model.form != nil || model.editingID != nil
     }
 
+    /// The window takes the mouse only over the black body (plus a small margin), and lets it through everywhere
+    /// else, so its big transparent frame never blocks the menu bar or the app underneath, while a click on the notch,
+    /// its chin or the open panel never reaches whatever is behind them.
+    ///
+    /// It's set in every mode rather than only while collapsed: once `ignoresMouseEvents` has been set at all, `false`
+    /// makes the whole frame catch clicks, transparent parts included, which would swallow the clicks the prompter
+    /// leaves to other apps (a record button, say). Not while a button is down, so a drag keeps its window.
+    private func updateMousePassThrough(at point: CGPoint = NSEvent.mouseLocation) {
+        guard NSEvent.pressedMouseButtons == 0 else { return }
+        // Collapsed, the margin matches the click that opens it; open, a little more covers the pointer outrunning
+        // the main thread on its way to a control near the edge.
+        let margin: CGFloat = model.mode.isExpanded ? 10 : 2
+        let passThrough = !bodyRect(margin: margin).contains(point)
+        if panel.ignoresMouseEvents != passThrough { panel.ignoresMouseEvents = passThrough }
+    }
+
+    /// The body can grow or shrink under a pointer that isn't moving (a form opens, a capture lands), so the
+    /// pass-through follows the body's size and mode as well as the pointer.
+    private func followBody() {
+        withObservationTracking {
+            _ = model.bodySize
+            _ = model.mode
+        } onChange: { [weak self] in
+            // Called before the change lands; look once it has.
+            Task { @MainActor in
+                self?.updateMousePassThrough()
+                self?.followBody()
+            }
+        }
+    }
+
     private func installMonitors() {
         let mouse: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown, .rightMouseDown]
         if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mouse, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.handleMouse(event) }
+            MainActor.assumeIsolated {
+                self?.updateMousePassThrough()
+                self?.handleMouse(event)
+            }
         }) {
             monitors.append(monitor)
         }
@@ -290,14 +315,20 @@ final class NotchController {
             let consumed = MainActor.assumeIsolated { () -> Bool in
                 guard let self else { return false }
                 if event.type == .keyDown { return self.handleKey(event) }
-                // Menus run their own tracking in their own windows; ignore those.
-                if event.window == nil || event.window === self.panel { self.handleMouse(event) }
+                // Wherever the event was headed, the pointer's position decides whether the window takes the next click.
+                self.updateMousePassThrough()
+                // Menus run their own tracking in their own windows; ignore those while the panel is open. Collapsed,
+                // only the position matters: with Insights in front, the pointer's moves are reported to that window.
+                if event.window == nil || event.window === self.panel || !self.model.mode.isExpanded {
+                    self.handleMouse(event)
+                }
                 return false
             }
             return consumed ? nil : event
         }) {
             monitors.append(monitor)
         }
+        followBody()
     }
 
     private func handleMouse(_ event: NSEvent) {
