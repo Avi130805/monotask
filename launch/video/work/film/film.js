@@ -48,7 +48,8 @@
   const NOTCH_HOME = cw(860, 34);                              // closed notch centre
   const ROW_PLAY = cw(991 + 300, 483);                         // v05b: the start control on "Fix login redirect"
   const FORM_START = cw(186 + 300, 381);                       // v06: Start button
-  const HOLD_BTN = cw(HOLD.x + HOLD.w * 0.42, HOLD.y + HOLD.h / 2);
+  const HOLD_BTN = cw(HOLD.x + HOLD.w * 0.22, HOLD.y + HOLD.h / 2);
+  const CHIN_HOVER = cw(690, 18);                              // hover point on the notch, clear of the chin text
   const REST = [1610, 960];                                    // where the pointer rests out of the way
 
   // Camera: world point (cx, cy) at screen centre, zoom z. Clamped so the desktop always fills the frame.
@@ -197,7 +198,7 @@
 
     // 1 · cold open on the payoff (0-4 s)
     N(0, "v09-peek-chin", "cut");
-    C(0, cw(905, 40));
+    C(0, CHIN_HOVER);
     K(0, notchShot(ZMAX));
     K(0.6, notchShot(1.3), 3.2);
     cap(0.5, 3.85, "", "One task. One finish line. Your coding agents know both.");
@@ -236,7 +237,7 @@
     C(20.6, REST, 0.7);
     N(21.0, "v08-closed-wings");
     K(21.0, notchShot(ZMAX));
-    C(22.3, cw(905, 40), 0.7);
+    C(22.3, CHIN_HOVER, 0.7);
     N(23.0, "v09-peek-chin");
     cap(21.2, 24.85, "2 · Start one task", "It sits in your notch. Hover to see the task and its finish line.");
 
@@ -299,7 +300,7 @@
     const cap = (t0, t1, step, line) => T.captions.push({ t0, t1, step, line });
 
     N(0, "v09-peek-chin", "cut");
-    C(0, cw(905, 40));
+    C(0, CHIN_HOVER);
     K(0, notchShot(ZMAX));
     K(0.4, notchShot(1.4), 2.6);
     cap(0.15, 2.9, "", "One task. One finish line. Your coding agents know both.");
