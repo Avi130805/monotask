@@ -184,7 +184,8 @@ enum SelfTest {
         inboxStore.capture("Current task")
         inboxStore.start(inboxStore.next[1].id, doneWhen: "Shipped")
         var announced: [Int] = []
-        let inbox = AgentInbox(store: inboxStore, folder: scratch.appendingPathComponent("inboxes", isDirectory: true)) {
+        let spool = scratch.appendingPathComponent("spool", isDirectory: true)
+        let inbox = AgentInbox(store: inboxStore, folder: scratch.appendingPathComponent("inboxes", isDirectory: true), spool: spool) {
             announced.append($0)
         }
         try? files.createDirectory(at: inbox.folder, withIntermediateDirectories: true)
@@ -242,6 +243,13 @@ enum SelfTest {
         RunLoop.current.run(until: Date().addingTimeInterval(0.8))
         check(inboxStore.next.last?.title == "Added while watching" && waiting().isEmpty,
               "a file renamed into the folder is picked up by the watcher")
+
+        try? Data("From a sandboxed agent".utf8).write(to: spool.appendingPathComponent(".tmp-spool"))
+        try? files.moveItem(at: spool.appendingPathComponent(".tmp-spool"), to: spool.appendingPathComponent("200-spooled.txt"))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        check(inboxStore.next.last?.title == "From a sandboxed agent"
+              && ((try? files.contentsOfDirectory(atPath: spool.path)) ?? []).isEmpty,
+              "the temp-folder spool for sandboxed agents is watched and emptied too")
     }
 
     private static func checkMigration(_ check: (Bool, String) -> Void, scratch: URL, list: URL) {

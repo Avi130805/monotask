@@ -29,7 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Coding agents read Do Now from a text file beside the list and add to Do Next through an inbox folder.
         let bridge = AgentBridge(store: store, folder: store.folder)
-        let inbox = AgentInbox(store: store, folder: store.folder) { [weak notch] position in
+        // Sandboxed agents drop items in a spool in the user's temp folder; a test run keeps its own beside the list.
+        let spool = file == nil ? AgentInbox.defaultSpool : store.folder.appendingPathComponent("spool", isDirectory: true)
+        let inbox = AgentInbox(store: store, folder: store.folder, spool: spool) { [weak notch] position in
             notch?.announceAdded(position: position)
         }
         self.agentBridge = bridge

@@ -3,34 +3,49 @@ import AppKit
 /// "Add to Do Next" from coding agents. The agent-side script drops one `.txt` file per item into `inbox/`
 /// (written as a dot-file first, then renamed, so a half-written file is never seen). Each file holds the
 /// item's title. Agents can only add to Do Next this way; they can't start, change or finish anything.
+///
+/// Sandboxed agents (Codex by default) can't write into Application Support, so the script falls back to a
+/// spool in the user's own temporary folder, which only this user can write to. Both are watched.
 @MainActor
 final class AgentInbox {
     static let maxTitleLength = 200
 
     let folder: URL
+    /// The fallback for sandboxed agents; nil in tests that don't need it.
+    let spool: URL?
     private let store: Store
     /// Called with the Do Next position of the last item added, after an import that added something.
     private let onAdded: (Int) -> Void
-    private var source: DispatchSourceFileSystemObject?
+    private var sources: [DispatchSourceFileSystemObject] = []
     private var wakeObserver: NSObjectProtocol?
     private var pendingScan: DispatchWorkItem?
 
-    init(store: Store, folder: URL, onAdded: @escaping (Int) -> Void) {
+    /// Where a sandboxed agent's script drops items: `$TMPDIR/monotask-inbox`.
+    nonisolated static var defaultSpool: URL {
+        URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("monotask-inbox", isDirectory: true)
+    }
+
+    init(store: Store, folder: URL, spool: URL? = nil, onAdded: @escaping (Int) -> Void) {
         self.store = store
         self.folder = folder.appendingPathComponent("inbox", isDirectory: true)
+        self.spool = spool
         self.onAdded = onAdded
     }
 
+    private var folders: [URL] { [folder] + (spool.map { [$0] } ?? []) }
+
     deinit {
-        source?.cancel()
+        sources.forEach { $0.cancel() }
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
     }
 
     /// Creates the folder, imports whatever is waiting, then keeps watching it.
     func start() {
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for folder in folders {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
         scan()
-        watch()
+        folders.forEach(watch)
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -38,7 +53,7 @@ final class AgentInbox {
         }
     }
 
-    private func watch() {
+    private func watch(_ folder: URL) {
         let descriptor = open(folder.path, O_EVTONLY)
         guard descriptor >= 0 else {
             NSLog("Monotask: couldn't watch the inbox at \(folder.path)")
@@ -50,7 +65,7 @@ final class AgentInbox {
         }
         source.setCancelHandler { close(descriptor) }
         source.resume()
-        self.source = source
+        sources.append(source)
     }
 
     /// A burst of files (or the delete after an import) triggers one scan, not many.
@@ -63,17 +78,20 @@ final class AgentInbox {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    /// Imports every waiting `*.txt`, in name order. Returns how many items were added to Do Next.
+    /// Imports every waiting `*.txt` from both folders, in name order (names start with a timestamp).
+    /// Returns how many items were added to Do Next.
     @discardableResult
     func scan() -> Int {
         let files = FileManager.default
-        let names = ((try? files.contentsOfDirectory(atPath: folder.path)) ?? [])
-            .filter { !$0.hasPrefix(".") && $0.lowercased().hasSuffix(".txt") }
-            .sorted()
+        let waiting = folders.flatMap { folder in
+            ((try? files.contentsOfDirectory(atPath: folder.path)) ?? [])
+                .filter { !$0.hasPrefix(".") && $0.lowercased().hasSuffix(".txt") }
+                .map { (name: $0, url: folder.appendingPathComponent($0)) }
+        }
+        .sorted { $0.name < $1.name }
         var lastPosition: Int?
         var added = 0
-        for name in names {
-            let url = folder.appendingPathComponent(name)
+        for (_, url) in waiting {
             guard let title = Self.title(from: url) else { continue }
             if !title.isEmpty && !isKnown(title), let position = store.capture(title) {
                 lastPosition = position
