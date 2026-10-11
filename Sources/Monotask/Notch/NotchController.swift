@@ -318,7 +318,7 @@ final class NotchController {
                 // Wherever the event was headed, the pointer's position decides whether the window takes the next click.
                 self.updateMousePassThrough()
                 // Menus run their own tracking in their own windows; ignore those while the panel is open. Collapsed,
-                // only the position matters: with Insights in front, the pointer's moves are reported to that window.
+                // only the position matters: with Insights in front, the pointer's moves can be reported to that window.
                 if event.window == nil || event.window === self.panel || !self.model.mode.isExpanded {
                     self.handleMouse(event)
                 }
