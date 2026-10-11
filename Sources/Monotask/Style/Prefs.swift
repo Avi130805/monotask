@@ -31,7 +31,7 @@ enum Prefs {
     static let lidGraceMinutes = "lidGraceMinutes"
     /// Find a working network if the internet drops. Default false.
     static let lidFailover = "lidFailover"
-    /// Fallback Wi-Fi network names, in the order to try them. Passwords are in the Keychain.
+    /// Fallback Wi-Fi network names, in the order to try them. No passwords: macOS uses the ones it saved.
     static let lidFallbackNetworks = "lidFallbackNetworks"
     /// Failover's record of recent attempts, so restarts can't reset its limits.
     static let lidFailoverLedger = "lidFailoverLedger"

@@ -24,7 +24,6 @@ final class LidWindow: NSObject, NSWindowDelegate {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         controller.tick()
-        controller.loadFallbackPasswords()
     }
 
     private func makeWindow() -> NSWindow {
@@ -160,7 +159,7 @@ struct LidSettingsView: View {
         .formStyle(.grouped)
         .frame(minWidth: 500, minHeight: 480)
         .sheet(isPresented: $addingNetwork) {
-            AddNetworkSheet(onAdd: { controller.addFallback(name: $0, password: $1) }, onClose: { addingNetwork = false })
+            AddNetworkSheet(onAdd: { controller.addFallback(name: $0) }, onClose: { addingNetwork = false })
         }
     }
 
@@ -307,9 +306,16 @@ struct FallbackList: View {
                     .frame(width: 14)
                 Image(systemName: "wifi")
                     .foregroundStyle(.secondary)
-                Text(ssid)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(ssid)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if controller.needsPassword.contains(ssid) {
+                        Text("Needs its password saved: join it once from the Wi-Fi menu")
+                            .font(Typeface.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer(minLength: 8)
                 Button { controller.moveFallback(ssid, by: -1) } label: { Image(systemName: "chevron.up") }
                     .disabled(index == 0)
@@ -318,19 +324,18 @@ struct FallbackList: View {
                     .disabled(index == controller.fallbacks.count - 1)
                     .help("Try this one later")
                 Button { controller.removeFallback(ssid) } label: { Image(systemName: "minus.circle") }
-                    .help("Remove, with its saved password")
+                    .help("Remove from this list")
             }
             .buttonStyle(.borderless)
         }
     }
 }
 
-/// Name and password for a fallback network. The password goes to the Keychain, never to Monotask's files.
+/// A fallback network, by name. Monotask keeps no password: macOS uses the one it saved when you joined the network.
 struct AddNetworkSheet: View {
-    var onAdd: (String, String) -> Bool
+    var onAdd: (String) -> Bool
     var onClose: () -> Void
     @State private var name = ""
-    @State private var password = ""
     @State private var refused = false
 
     var body: some View {
@@ -338,18 +343,17 @@ struct AddNetworkSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Add a fallback network")
                     .font(.headline)
-                Text("Its name exactly as Wi-Fi shows it. The password is kept in your Keychain.")
+                Text("Its name exactly as Wi-Fi shows it. Join this network once from the Wi-Fi menu so your Mac remembers its password.")
                     .font(Typeface.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Form {
                 TextField("Network name", text: $name)
-                SecureField("Password", text: $password, prompt: Text("Leave empty for an open network"))
             }
             .formStyle(.columns)
             if refused {
-                Text("Couldn't add it. The name may already be on the list or be too long, or the Keychain said no.")
+                Text("Couldn't add it. The name may already be on the list, or be too long.")
                     .font(Typeface.footnote)
                     .foregroundStyle(WindowPalette.accentText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -359,7 +363,7 @@ struct AddNetworkSheet: View {
                 Button("Cancel", action: onClose)
                     .keyboardShortcut(.cancelAction)
                 Button("Add") {
-                    if onAdd(name, password) { onClose() } else { refused = true }
+                    if onAdd(name) { onClose() } else { refused = true }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

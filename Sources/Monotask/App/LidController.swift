@@ -46,6 +46,8 @@ final class LidController {
     private(set) var working = 0
     private(set) var work: Work?
     private(set) var fallbacks: [String] = []
+    /// Fallback networks that asked for a password macOS hasn't saved, last time they were tried.
+    private(set) var needsPassword: Set<String> = []
     /// Set right after installing, while the helper starts.
     private(set) var startingSince: Date?
     /// Sleep is off because of Monotask's helper, and it isn't being turned back on: the helper isn't running, or it
@@ -63,7 +65,6 @@ final class LidController {
     @ObservationIgnored private let interactive: Bool
     @ObservationIgnored private let prober: ConnectivityProbing
     @ObservationIgnored private let wifi: WiFiControlling
-    @ObservationIgnored private let passwords: WiFiPasswordStoring
     /// Tests catch failover's commands here instead of running them.
     @ObservationIgnored var commandSink: ((Failover.Command) -> Void)?
 
@@ -83,7 +84,6 @@ final class LidController {
     /// The last look at the agents' child processes, for telling a long build from a permission prompt.
     @ObservationIgnored private var processSample: AgentActivity.ProcessSample?
     @ObservationIgnored private var failover: Failover
-    @ObservationIgnored private var passwordCache: [String: String] = [:]
     @ObservationIgnored private var wifiDevice: String?
     @ObservationIgnored private var wifiPower = WiFiPowerGuard()
     @ObservationIgnored private var timer: Timer?
@@ -97,8 +97,7 @@ final class LidController {
 
     /// `interactive` false (tests, snapshots) never shows an alert and never asks for a password.
     init(dataFolder: URL, defaults: UserDefaults = .standard, machine: LidMachine = LidMachine(), interactive: Bool = true,
-         prober: ConnectivityProbing = URLSessionProber(), wifi: WiFiControlling = NetworkSetupWiFi(),
-         passwords: WiFiPasswordStoring = KeychainWiFiPasswords()) {
+         prober: ConnectivityProbing = URLSessionProber(), wifi: WiFiControlling = NetworkSetupWiFi()) {
         leaseURL = LidHelper.leaseURL(dataFolder: dataFolder)
         agentsFolder = dataFolder.appendingPathComponent("agents", isDirectory: true)
         self.defaults = defaults
@@ -106,7 +105,6 @@ final class LidController {
         self.interactive = interactive
         self.prober = prober
         self.wifi = wifi
-        self.passwords = passwords
         leaseReleasedAt = machine.now()
         failover = Failover(ledger: FailoverLedger.load(defaults))
         fallbacks = (defaults.stringArray(forKey: Prefs.lidFallbackNetworks) ?? []).filter { !$0.isEmpty }
@@ -319,6 +317,7 @@ final class LidController {
         if failover.ledger != ledgerBefore { failover.ledger.save(defaults) }
         let text = settings.failover ? failover.status(now: now) : ""
         if text != networkStatus { networkStatus = text }
+        if failover.needsPassword != needsPassword { needsPassword = failover.needsPassword }
     }
 
     // MARK: The lease
@@ -396,12 +395,9 @@ final class LidController {
                     return (outcome, outcome == .done || outcome == .unavailable ? true : nil)
                 }
             case .join(let ssid, let generation):
-                let cached = passwordCache[ssid]
-                let passwords = self.passwords
                 let ensureFirst = wifiPower.unconfirmed
                 act(generation: generation) { wifi, device in
-                    Self.performJoin(wifi: wifi, device: device, ssid: ssid, ensureFirst: ensureFirst,
-                                     password: cached ?? passwords.password(for: ssid, interactive: false))
+                    Self.performJoin(wifi: wifi, device: device, ssid: ssid, ensureFirst: ensureFirst)
                 }
             }
         }
@@ -409,10 +405,9 @@ final class LidController {
 
     /// A join, after turning Wi-Fi back on first if a power cycle left it unconfirmed. Returns the join's outcome and,
     /// if it was checked, whether Wi-Fi is confirmed on.
-    nonisolated static func performJoin(wifi: WiFiControlling, device: String, ssid: String, ensureFirst: Bool,
-                                        password: String? = nil) -> (Failover.ActionOutcome, Bool?) {
+    nonisolated static func performJoin(wifi: WiFiControlling, device: String, ssid: String, ensureFirst: Bool) -> (Failover.ActionOutcome, Bool?) {
         let confirmed = ensureFirst ? wifi.ensureOn(device: device) : nil
-        return (wifi.join(device: device, ssid: ssid, password: password), confirmed)
+        return (wifi.join(device: device, ssid: ssid), confirmed)
     }
 
     /// Turns Wi-Fi back on, off the main thread, after a power cycle that didn't confirm it. Lid open or closed: it
@@ -630,27 +625,23 @@ final class LidController {
 
     // MARK: Fallback networks
 
-    /// Adds a network to try, its password (if any) in the Keychain. Returns false if it can't.
+    /// Adds a network to try, by name only: Monotask never stores or passes a Wi-Fi password, and relies on the one
+    /// macOS saved when the user joined the network once. Returns false if it can't.
     @discardableResult
-    func addFallback(name: String, password: String) -> Bool {
+    func addFallback(name: String) -> Bool {
         let ssid = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ssid.isEmpty, ssid.utf8.count <= 32, !fallbacks.contains(ssid),
               !ssid.contains(where: { $0.isNewline || ($0.asciiValue.map { $0 < 32 } ?? false) }) else { return false }
-        if !password.isEmpty {
-            guard passwords.setPassword(password, for: ssid) else { return false }
-            passwordCache[ssid] = password
-        }
         fallbacks.append(ssid)
         saveFallbacks()
         return true
     }
 
     func removeFallback(_ ssid: String) {
-        passwords.removePassword(for: ssid)
-        passwordCache[ssid] = nil
         fallbacks.removeAll { $0 == ssid }
         saveFallbacks()
     }
+
 
     func moveFallback(_ ssid: String, by offset: Int) {
         guard let index = fallbacks.firstIndex(of: ssid) else { return }
@@ -658,22 +649,6 @@ final class LidController {
         guard fallbacks.indices.contains(target) else { return }
         fallbacks.swapAt(index, target)
         saveFallbacks()
-    }
-
-    /// While the window is open someone is there to answer a Keychain prompt; later, with the lid closed, nobody is.
-    func loadFallbackPasswords() {
-        guard interactive, settings.failover else { return }
-        let names = fallbacks.filter { passwordCache[$0] == nil }
-        guard !names.isEmpty else { return }
-        let passwords = self.passwords
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let found = names.compactMap { name in passwords.password(for: name, interactive: true).map { (name, $0) } }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    for (name, password) in found { self?.passwordCache[name] = password }
-                }
-            }
-        }
     }
 
     private func saveFallbacks() {
@@ -685,7 +660,11 @@ final class LidController {
 
     /// Snapshot-only: shows a made-up state without any sensors.
     func pose(reason: LidReason, helper: HelperState, working: Int = 0, awakeFor: TimeInterval? = nil, network: String = "",
-              fallbacks: [String] = []) {
+              fallbacks: [String] = [], needsPassword: Set<String> = [], stuck: Bool = false, helperReason: String? = nil) {
+        self.needsPassword = needsPassword
+        settingStuck = stuck
+        helperAlive = helper == .running || helper == .outdated
+        self.helperReason = helperReason
         decision = LidPolicy.Decision(keepAwake: reason.keepsAwake, reason: reason, latch: nil)
         helperState = helper
         self.working = working

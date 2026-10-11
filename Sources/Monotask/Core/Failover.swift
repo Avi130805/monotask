@@ -1,6 +1,4 @@
 import Foundation
-import LocalAuthentication
-import Security
 
 // MARK: Probes
 
@@ -189,12 +187,19 @@ struct Failover {
         case done
         /// The action isn't allowed for this user (networksetup wanted an administrator).
         case unavailable
+        /// The network wants a password macOS hasn't saved (Monotask never stores or passes one).
+        case needsPassword
         case failed
     }
 
     let config: Config
     /// The user's fallback networks, in order.
-    var fallbacks: [String] = []
+    var fallbacks: [String] = [] {
+        didSet { needsPassword.formIntersection(fallbacks) }
+    }
+    /// Fallback networks that asked for a password macOS hasn't saved. Skipped until failover is armed again (the
+    /// next time the lid closes with agents working), when the user may have joined them once from the Wi-Fi menu.
+    private(set) var needsPassword: Set<String> = []
     private(set) var ledger: FailoverLedger
     private(set) var phase: Phase = .inactive
     /// Bumped by every command and every reset; an answer carrying another generation is stale.
@@ -227,6 +232,7 @@ struct Failover {
         if active {
             guard phase == .inactive else { return }
             reset(to: .healthy)
+            needsPassword = []
             quietUntil = now.addingTimeInterval(config.settle)
         } else {
             guard phase != .inactive else { return }
@@ -367,10 +373,15 @@ struct Failover {
             case .unavailable:
                 powerCycleUnavailable = true
                 return fallBack(now: now)
-            case .failed:
+            case .failed, .needsPassword:
                 return fallBack(now: now)
             }
         case .joining(let ssid):
+            if outcome == .needsPassword {
+                // Not this network's fault, and retrying won't help: skip it and move on.
+                needsPassword.insert(ssid)
+                return fallBack(now: now)
+            }
             guard outcome == .done else { return failed(ssid, now: now) }
             phase = .verifying(.join(ssid), since: now)
             verifyHits = []
@@ -438,6 +449,7 @@ struct Failover {
     }
 
     func isAvailable(_ ssid: String, now: Date) -> Bool {
+        guard !needsPassword.contains(ssid) else { return false }
         guard let until = ledger.networks[ssid]?.until else { return true }
         return now >= until
     }
@@ -486,6 +498,11 @@ struct Failover {
         case .joining(let ssid): return "No internet · trying \(ssid) (\(hour) of \(config.perHour) this hour)"
         case .waiting:
             if fallbacks.isEmpty { return "No internet · no fallback networks to try" }
+            if fallbacks.allSatisfy({ needsPassword.contains($0) }) {
+                return fallbacks.count == 1
+                    ? "No internet · \(fallbacks[0]) needs its password saved: join it once from the Wi-Fi menu"
+                    : "No internet · the fallback networks need their passwords saved: join each once from the Wi-Fi menu"
+            }
             if !budgetAllows(now: now) { return "No internet · waiting, \(hour) of \(config.perHour) tries used this hour" }
             return "No internet · waiting for a network to try again"
         case .giveUp: return "Gave up after \(Int(config.giveUpAfter / 60)) minutes offline; letting the Mac sleep"
@@ -524,7 +541,8 @@ protocol ConnectivityProbing: Sendable {
 protocol WiFiControlling: Sendable {
     /// `.done` only once Wi-Fi is confirmed back on.
     func powerCycle(device: String) -> Failover.ActionOutcome
-    func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome
+    /// Joins with the password macOS saved when the user joined the network themselves; none is ever passed.
+    func join(device: String, ssid: String) -> Failover.ActionOutcome
     /// Turns Wi-Fi on if it isn't. True once it's confirmed on.
     func ensureOn(device: String) -> Bool
 }
@@ -558,13 +576,6 @@ struct WiFiPowerGuard: Equatable {
         ensuring = false
         if confirmed { unconfirmed = false }
     }
-}
-
-protocol WiFiPasswordStoring: Sendable {
-    /// `interactive` false never shows a Keychain prompt (nobody is there to answer it with the lid closed).
-    func password(for ssid: String, interactive: Bool) -> String?
-    @discardableResult func setPassword(_ password: String, for ssid: String) -> Bool
-    func removePassword(for ssid: String)
 }
 
 /// Probes over an ephemeral URLSession: no cache, no cookies, no redirects followed, 6 s per request.
@@ -649,13 +660,19 @@ struct NetworkSetupWiFi: WiFiControlling {
         return nil
     }
 
-    func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome {
-        var arguments = ["-setairportnetwork", device, ssid]
-        if let password, !password.isEmpty { arguments.append(password) }
-        let result = Self.run(arguments)
-        if Self.needsAdmin(result) { return .unavailable }
-        // networksetup can exit 0 and still say it failed.
+    /// `networksetup -setairportnetwork <dev> <ssid>`, with no password argument: it stays out of `ps`, and macOS uses the
+    /// one it saved when the user joined this network from the Wi-Fi menu. (Unverified on every macOS version: if
+    /// networksetup won't use the saved password, the join reports `.needsPassword` or `.failed` and the next network
+    /// is tried.)
+    func join(device: String, ssid: String) -> Failover.ActionOutcome {
+        Self.classifyJoin(Self.run(["-setairportnetwork", device, ssid]))
+    }
+
+    /// What networksetup's answer to a join means. It can exit 0 and still say it failed.
+    static func classifyJoin(_ result: (status: Int32, output: String)) -> Failover.ActionOutcome {
+        if needsAdmin(result) { return .unavailable }
         let said = result.output.lowercased()
+        if ["password", "passphrase", "credential", "authenticat"].contains(where: { said.contains($0) }) { return .needsPassword }
         if result.status != 0 || said.contains("could not") || said.contains("failed") || said.contains("error") { return .failed }
         return .done
     }
@@ -683,54 +700,5 @@ struct NetworkSetupWiFi: WiFiControlling {
     /// The Wi-Fi device, or nil if there's none.
     static func wifiDevice() -> String? {
         WiFiDevice.parse(hardwarePorts: run(["-listallhardwareports"]).output)
-    }
-}
-
-/// Fallback passwords in the login Keychain: generic passwords, service "Monotask Wi-Fi", account = network name.
-struct KeychainWiFiPasswords: WiFiPasswordStoring {
-    static let service = "Monotask Wi-Fi"
-
-    func password(for ssid: String, interactive: Bool) -> String? {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: ssid,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        if !interactive {
-            let context = LAContext()
-            context.interactionNotAllowed = true
-            query[kSecUseAuthenticationContext as String] = context
-        }
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    @discardableResult
-    func setPassword(_ password: String, for ssid: String) -> Bool {
-        let match: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: ssid,
-        ]
-        let data = Data(password.utf8)
-        if SecItemCopyMatching(match as CFDictionary, nil) == errSecSuccess {
-            return SecItemUpdate(match as CFDictionary, [kSecValueData as String: data] as CFDictionary) == errSecSuccess
-        }
-        var add = match
-        add[kSecValueData as String] = data
-        add[kSecAttrLabel as String] = "Monotask Wi-Fi: \(ssid)"
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
-    }
-
-    func removePassword(for ssid: String) {
-        let match: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: ssid,
-        ]
-        SecItemDelete(match as CFDictionary)
     }
 }

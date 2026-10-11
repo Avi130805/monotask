@@ -79,7 +79,7 @@ Both are plain text in [Sources/Monotask/Core/LidHelper.swift](Sources/Monotask/
 
 A closed MacBook can't cool itself well, especially in a bag. Give it some air.
 
-**If the internet drops** (off by default, *Find a working network if the internet drops*): with the lid closed, Monotask waits for macOS to reconnect, turns Wi-Fi off and on once, then tries the fallback networks you listed, in your order, with their passwords in your Keychain. It makes at most 3 attempts in 10 minutes and 6 in an hour, waits longer before retrying a network each time it fails, and gives up after 15 minutes offline, which lets the Mac sleep. To fall back to your iPhone, turn on Personal Hotspot's *Allow Others to Join*, and set *Ask to join hotspots* to *Automatic* in your Mac's Wi-Fi settings.
+**If the internet drops** (off by default, *Find a working network if the internet drops*): with the lid closed, Monotask waits for macOS to reconnect, turns Wi-Fi off and on once, then tries the fallback networks you listed, in your order. Monotask keeps no Wi-Fi passwords: it joins with the one macOS saved, so join each fallback network once from the Wi-Fi menu first. A network macOS has no password for is skipped, and the window says so. It makes at most 3 attempts in 10 minutes and 6 in an hour, waits longer before retrying a network each time it fails, and gives up after 15 minutes offline, which lets the Mac sleep. To fall back to your iPhone, turn on Personal Hotspot's *Allow Others to Join*, and set *Ask to join hotspots* to *Automatic* in your Mac's Wi-Fi settings.
 
 **Removing it.** *Remove Helper…* in the window, or by hand:
 

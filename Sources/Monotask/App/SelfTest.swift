@@ -1128,6 +1128,31 @@ extension SelfTest {
         rig.rounds(3, .online)
         check(rig.machine.phase == .fallbackActive("Cafe"), "and it stays on it while it works")
 
+        // A network whose password macOS hasn't saved.
+        rig = FailoverRig(fallbacks: ["Cafe", "Home"])
+        rig.rounds(3, .down)
+        rig.finish(.unavailable)
+        rig.finish(.needsPassword)
+        check(rig.joins == ["Cafe", "Home"] && rig.machine.needsPassword == ["Cafe"] && rig.machine.ledger.networks["Cafe"] == nil
+              && !rig.machine.isAvailable("Cafe", now: rig.now + 3_600),
+              "a network that needs a password is marked unavailable, with no cooldown, and the next one is tried")
+        rig.finish(.needsPassword)
+        check(rig.machine.phase == .waiting && rig.machine.status(now: rig.now)
+              == "No internet · the fallback networks need their passwords saved: join each once from the Wi-Fi menu",
+              "with every fallback needing a password, the status says what to do")
+        rig.machine.setActive(false, now: rig.now)
+        check(rig.machine.needsPassword == ["Cafe", "Home"], "the marks stay while the lid is open, for the window")
+        rig.machine.setActive(true, now: rig.now)
+        check(rig.machine.needsPassword.isEmpty, "and are cleared the next time failover starts, to try again")
+        rig = FailoverRig(fallbacks: ["Cafe"])
+        rig.rounds(3, .down)
+        rig.finish(.unavailable)
+        rig.finish(.needsPassword)
+        check(rig.machine.status(now: rig.now) == "No internet · Cafe needs its password saved: join it once from the Wi-Fi menu",
+              "one network: named in the status")
+        rig.machine.fallbacks = []
+        check(rig.machine.needsPassword.isEmpty, "removing a network drops its mark")
+
         // Budget.
         var long = Failover.Config()
         long.giveUpAfter = 10 * 3_600
@@ -1750,21 +1775,14 @@ extension SelfTest {
 
 // MARK: - Lid-closed mode, the app's side
 
-/// Stand-ins for the real world: no network, no Wi-Fi changes, no Keychain.
-private final class FakePasswords: WiFiPasswordStoring, @unchecked Sendable {
-    var stored: [String: String] = [:]
-    func password(for ssid: String, interactive: Bool) -> String? { stored[ssid] }
-    func setPassword(_ password: String, for ssid: String) -> Bool { stored[ssid] = password; return true }
-    func removePassword(for ssid: String) { stored[ssid] = nil }
-}
-
+/// Stand-ins for the real world: no network, no Wi-Fi changes.
 private struct FakeProber: ConnectivityProbing {
     func probeRound() async -> [ProbeOutcome] { [.ok, .ok, .ok] }
 }
 
 private struct FakeWiFi: WiFiControlling {
     func powerCycle(device: String) -> Failover.ActionOutcome { .failed }
-    func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome { .failed }
+    func join(device: String, ssid: String) -> Failover.ActionOutcome { .failed }
     func ensureOn(device: String) -> Bool { true }
 }
 
@@ -1773,7 +1791,7 @@ private final class RecordingWiFi: WiFiControlling, @unchecked Sendable {
     var calls: [String] = []
     var on = true
     func powerCycle(device: String) -> Failover.ActionOutcome { calls.append("cycle \(device)"); return .failed }
-    func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome { calls.append("join \(device) \(ssid)"); return .done }
+    func join(device: String, ssid: String) -> Failover.ActionOutcome { calls.append("join \(device) \(ssid)"); return .done }
     func ensureOn(device: String) -> Bool { calls.append("on \(device)"); return on }
 }
 
@@ -1812,9 +1830,8 @@ extension SelfTest {
         }
         machine.ownedMarkerExists = { owned }
 
-        let passwords = FakePasswords()
         let controller = LidController(dataFolder: scratch, defaults: defaults, machine: machine, interactive: false,
-                                       prober: FakeProber(), wifi: FakeWiFi(), passwords: passwords)
+                                       prober: FakeProber(), wifi: FakeWiFi())
         var commands: [Failover.Command] = []
         controller.commandSink = { commands.append($0) }
         let lease = controller.leaseURL
@@ -2014,13 +2031,13 @@ extension SelfTest {
         defaults.set(true, forKey: Prefs.lidEnabled)
 
         // Fallback networks.
-        check(controller.addFallback(name: "  Studio Wi-Fi ", password: "hunter22") && controller.fallbacks == ["Studio Wi-Fi"]
-              && passwords.stored["Studio Wi-Fi"] == "hunter22", "a fallback network is added, its password in the Keychain")
-        check(controller.addFallback(name: "Avi's iPhone", password: "") && passwords.stored["Avi's iPhone"] == nil,
-              "a network without a password stores none")
-        check(!controller.addFallback(name: "Studio Wi-Fi", password: "x") && !controller.addFallback(name: "  ", password: "x")
-              && !controller.addFallback(name: String(repeating: "n", count: 33), password: "x")
-              && !controller.addFallback(name: "Two\nlines", password: ""),
+        check(controller.addFallback(name: "  Studio Wi-Fi ") && controller.fallbacks == ["Studio Wi-Fi"]
+              && defaults.stringArray(forKey: Prefs.lidFallbackNetworks) == ["Studio Wi-Fi"],
+              "a fallback network is added by name only: no password is asked for or kept")
+        check(controller.addFallback(name: "Avi's iPhone"), "a second one too")
+        check(!controller.addFallback(name: "Studio Wi-Fi") && !controller.addFallback(name: "  ")
+              && !controller.addFallback(name: String(repeating: "n", count: 33))
+              && !controller.addFallback(name: "Two\nlines"),
               "duplicates, blanks, names over 32 bytes and control characters are refused")
         controller.moveFallback("Avi's iPhone", by: -1)
         check(controller.fallbacks == ["Avi's iPhone", "Studio Wi-Fi"]
@@ -2029,8 +2046,7 @@ extension SelfTest {
         controller.moveFallback("Avi's iPhone", by: -1)
         check(controller.fallbacks == ["Avi's iPhone", "Studio Wi-Fi"], "moving past the top does nothing")
         controller.removeFallback("Studio Wi-Fi")
-        check(controller.fallbacks == ["Avi's iPhone"] && passwords.stored["Studio Wi-Fi"] == nil,
-              "removing a network deletes its password too")
+        check(controller.fallbacks == ["Avi's iPhone"], "a network can be removed")
 
         // Wi-Fi is never left off after a power cycle that didn't confirm it came back.
         var power = WiFiPowerGuard()
@@ -2061,6 +2077,13 @@ extension SelfTest {
         recorder.calls = []
         _ = LidController.performJoin(wifi: recorder, device: "en0", ssid: "Cafe", ensureFirst: false)
         check(recorder.calls == ["join en0 Cafe"], "otherwise the join goes straight ahead")
+        check(NetworkSetupWiFi.classifyJoin((0, "")) == .done
+              && NetworkSetupWiFi.classifyJoin((0, "Could not find network Cafe.")) == .failed
+              && NetworkSetupWiFi.classifyJoin((1, "Failed to join network Cafe.\nError: -3900")) == .failed
+              && NetworkSetupWiFi.classifyJoin((0, "Failed to join network Cafe: a password is required")) == .needsPassword
+              && NetworkSetupWiFi.classifyJoin((1, "Failed to join network Cafe: invalid credentials")) == .needsPassword
+              && NetworkSetupWiFi.classifyJoin((14, "You must run this tool as an administrator.")) == .unavailable,
+              "networksetup's join answers are read: joined, failed, needs a password, needs an administrator")
         check(NetworkSetupWiFi.isOn(airportPower: "Wi-Fi Power (en0): On\n") == true
               && NetworkSetupWiFi.isOn(airportPower: "Wi-Fi Power (en0): Off\n") == false
               && NetworkSetupWiFi.isOn(airportPower: "en0 is not a Wi-Fi interface.\n") == nil,
