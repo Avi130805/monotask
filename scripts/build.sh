@@ -15,7 +15,8 @@ fi
 if [[ -z "${SDKROOT:-}" ]]; then
   sdk=$(xcrun --show-sdk-path)
   needs_macros() { grep -qs '"StateMacro"' "$1"/System/Library/Frameworks/SwiftUICore.framework/Versions/A/Modules/SwiftUICore.swiftmodule/*-apple-macos.swiftinterface }
-  have_macros() { [[ -e /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib || -e "$1/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib" ]] }
+  toolchain=$(dirname "$(xcrun --find swift)")/..
+  have_macros() { [[ -e "$toolchain/lib/swift/host/plugins/libSwiftUIMacros.dylib" || -e "$1/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib" ]] }
   if needs_macros "$sdk" && ! have_macros "$sdk"; then
     for candidate in ${(On)$(print -l "${sdk:h}"/MacOSX[0-9]*.[0-9]*.sdk(N))}; do
       if ! needs_macros "$candidate"; then
