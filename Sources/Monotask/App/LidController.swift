@@ -11,7 +11,10 @@ struct LidMachine {
     var thermal: () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState }
     var lowPowerMode: () -> Bool = { ProcessInfo.processInfo.isLowPowerModeEnabled }
     var power: () -> PowerSource.Reading = { PowerSource.read() }
-    var lidClosed: () -> Bool = { RootDomain.bool("AppleClamshellState") ?? false }
+    /// Whether this Mac has a battery at all, asked separately from reading it, so a failed reading isn't taken for a desktop.
+    var hasBattery: () -> Bool = { PowerSource.hasBattery() }
+    /// nil when the lid can't be read.
+    var lidClosed: () -> Bool? = { RootDomain.bool("AppleClamshellState") }
     var sleepDisabled: () -> Bool? = { RootDomain.bool("SleepDisabled") }
     var helperInstalled: () -> LidHelper.Installed = { LidHelper.installed() }
     var helperStatus: () -> LidHelper.Status? = { LidHelper.readStatus() }
@@ -255,7 +258,7 @@ final class LidController {
         guard settings.enabled else {
             latch = nil
             closedAwakeSince = nil
-            apply(LidPolicy.Decision(keepAwake: false, reason: .off, latch: nil), lidClosed: false, now: now, settings: settings)
+            apply(LidPolicy.Decision(keepAwake: false, reason: .off, latch: nil), lidClosed: false, lidSeenClosed: false, now: now, settings: settings)
             return
         }
 
@@ -267,10 +270,12 @@ final class LidController {
             seriousSince = nil
         }
         let power = machine.power()
-        let lidClosed = machine.lidClosed()
+        // A lid that can't be read counts as closed for the time limit and the latch; only seeing it open resets them.
+        let lidReading = machine.lidClosed()
+        let lidClosed = lidReading ?? true
         if summary.working > 0 { lastWorking = now }
         // The time limit and a latched cutout start over only when the lid is seen open (or the mode is switched off).
-        if !lidClosed {
+        if lidReading == false {
             closedAwakeSince = nil
             latch = nil
         }
@@ -279,16 +284,17 @@ final class LidController {
         input.settings = settings
         input.sensors = LidPolicy.Sensors(helperReady: fresh, thermal: thermal, seriousSince: seriousSince,
                                           lowPowerMode: machine.lowPowerMode(), onBattery: power.onBattery,
-                                          batteryPercent: power.percent, noInternet: failover.noInternet)
+                                          batteryPercent: power.percent, hasBattery: machine.hasBattery(), noInternet: failover.noInternet)
         input.activity = LidPolicy.Activity(working: summary.working, lastWorking: lastWorking)
         input.lid = LidPolicy.Lid(closed: lidClosed, awakeSince: closedAwakeSince)
         input.now = now
         let decision = LidPolicy.decide(input, latch: latch)
         latch = decision.latch
-        apply(decision, lidClosed: lidClosed, now: now, settings: settings)
+        apply(decision, lidClosed: lidClosed, lidSeenClosed: lidReading == true, now: now, settings: settings)
     }
 
-    private func apply(_ decision: LidPolicy.Decision, lidClosed: Bool, now: Date, settings: LidSettings) {
+    /// `lidClosed` is closed or unknown (for the time limit); `lidSeenClosed` is actually read as closed (for Wi-Fi changes).
+    private func apply(_ decision: LidPolicy.Decision, lidClosed: Bool, lidSeenClosed: Bool, now: Date, settings: LidSettings) {
         if decision != self.decision { self.decision = decision }
         if decision.keepAwake {
             awakeSince = awakeSince ?? now
@@ -303,7 +309,7 @@ final class LidController {
         if settings.enabled && helperState == .running { beginNapGuard() } else { endNapGuard() }
 
         // Failover only while the lid is closed and the Mac is being kept awake (or it has just given up).
-        let failoverActive = settings.enabled && settings.failover && lidClosed
+        let failoverActive = settings.enabled && settings.failover && lidSeenClosed
             && (decision.keepAwake || (decision.latch == .noInternet && failover.noInternet))
         let ledgerBefore = failover.ledger
         failover.setActive(failoverActive, now: now)
@@ -394,7 +400,7 @@ final class LidController {
 
     /// Runs a Wi-Fi action off the main thread, never with the lid open, and reports back with its generation.
     private func act(generation: Int, _ body: @escaping @Sendable (WiFiControlling, String) -> Failover.ActionOutcome) {
-        guard machine.lidClosed() else {
+        guard machine.lidClosed() == true else {
             evaluate()
             return
         }
@@ -711,6 +717,14 @@ enum PowerSource {
         var onBattery = false
         /// nil without a battery.
         var percent: Int?
+    }
+
+    /// An internal battery is registered (AppleSmartBattery), whether or not its numbers can be read right now.
+    static func hasBattery() -> Bool {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard service != 0 else { return false }
+        IOObjectRelease(service)
+        return true
     }
 
     static func read() -> Reading {

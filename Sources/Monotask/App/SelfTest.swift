@@ -848,6 +848,7 @@ extension SelfTest {
             ("the floor never goes below 10%", { $0.settings.batteryFloor = 5; $0.sensors.batteryPercent = 10 }, false, .batteryLow(10)),
             ("11% with a floor set to 5: awake", { $0.settings.batteryFloor = 5; $0.sensors.batteryPercent = 11 }, true, .working(1)),
             ("no battery (a desktop): awake", { $0.sensors.batteryPercent = nil }, true, .working(1)),
+            ("a battery that can't be read: sleep", { $0.sensors.batteryPercent = nil; $0.sensors.hasBattery = true }, false, .batteryUnknown),
             ("the time limit reached with the lid closed: sleep", { $0.lid.awakeSince = now.addingTimeInterval(-7_200) }, false, .timeLimit),
             ("just under the time limit: awake", { $0.lid.awakeSince = now.addingTimeInterval(-7_100) }, true, .working(1)),
             ("the time limit is about the lid being closed", { $0.lid = LidPolicy.Lid(closed: false, awakeSince: nil) }, true, .working(1)),
@@ -894,7 +895,7 @@ extension SelfTest {
         }
 
         let texts = [LidReason.off, .helperMissing, .idle, .working(1), .working(3), .finishing, .tooHot, .hot,
-                     .lowPowerMode, .onBattery, .batteryLow(21), .timeLimit, .noInternet].map(\.text)
+                     .lowPowerMode, .onBattery, .batteryLow(21), .batteryUnknown, .timeLimit, .noInternet].map(\.text)
         check(texts.allSatisfy { !$0.contains("—") && !$0.contains("–") && !$0.isEmpty }, "status lines are plain, with no dashes")
         check(LidReason.working(1).text == "Keeping your Mac awake: 1 agent working"
               && LidReason.working(2).text == "Keeping your Mac awake: 2 agents working"
@@ -1779,7 +1780,8 @@ extension SelfTest {
 
         var clock = Date(timeIntervalSince1970: 1_800_000_000)
         var thermal = ProcessInfo.ThermalState.nominal
-        var lidClosed = false
+        var lidClosed: Bool? = false
+        var batteryPercent: Int? = 90
         var installed = LidHelper.Installed.current
         var statusAge: TimeInterval = 2
         var statusAlive = true
@@ -1790,7 +1792,8 @@ extension SelfTest {
         machine.now = { clock }
         machine.thermal = { thermal }
         machine.lowPowerMode = { false }
-        machine.power = { PowerSource.Reading(onBattery: false, percent: 90) }
+        machine.power = { PowerSource.Reading(onBattery: false, percent: batteryPercent) }
+        machine.hasBattery = { true }
         machine.lidClosed = { lidClosed }
         machine.sleepDisabled = { sleepDisabled }
         machine.helperInstalled = { installed }
@@ -1906,6 +1909,27 @@ extension SelfTest {
         lidClosed = false
         controller.evaluate(activity: one)
         check(controller.decision.reason == .working(1), "opening the lid starts over")
+
+        // Sensors that fail don't fail open.
+        batteryPercent = nil
+        clock += 5
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .batteryUnknown && leaseText() == nil,
+              "a Mac with a battery that can't be read: the lease goes")
+        batteryPercent = 90
+        lidClosed = nil
+        clock += 5
+        controller.evaluate(activity: one)
+        clock += 7_205
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit && leaseText() == nil,
+              "a lid that can't be read counts as closed for the time limit")
+        clock += 5
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .timeLimit, "…and for the latch")
+        lidClosed = false
+        controller.evaluate(activity: one)
+        check(controller.decision.reason == .working(1), "seeing the lid open starts over")
 
         // Failover runs only with the lid closed, the Mac kept awake, and the setting on.
         commands = []

@@ -53,6 +53,8 @@ enum LidReason: Equatable {
     case lowPowerMode
     case onBattery
     case batteryLow(Int)
+    /// A Mac with a battery whose level can't be read.
+    case batteryUnknown
     case timeLimit
     /// Failover gave up.
     case noInternet
@@ -68,7 +70,7 @@ enum LidReason: Equatable {
     /// whatever the agents, the helper or the sensors do in between: a Mac in a bag that dark-wakes mustn't re-arm.
     var isCutout: Bool {
         switch self {
-        case .tooHot, .hot, .lowPowerMode, .onBattery, .batteryLow, .timeLimit, .noInternet: return true
+        case .tooHot, .hot, .lowPowerMode, .onBattery, .batteryLow, .batteryUnknown, .timeLimit, .noInternet: return true
         default: return false
         }
     }
@@ -85,6 +87,7 @@ enum LidReason: Equatable {
         case .lowPowerMode: return "Letting your Mac sleep: Low Power Mode is on"
         case .onBattery: return "Letting your Mac sleep: it's on battery"
         case .batteryLow(let percent): return "Letting your Mac sleep: the battery is at \(percent)%"
+        case .batteryUnknown: return "Letting your Mac sleep: it can't read the battery level"
         case .timeLimit: return "Letting your Mac sleep: it reached your time limit"
         case .noInternet: return "Letting your Mac sleep: the internet is gone"
         }
@@ -107,6 +110,8 @@ enum LidPolicy {
         var onBattery = false
         /// nil when there's no battery or it can't be read.
         var batteryPercent: Int?
+        /// The Mac has a battery, so a missing reading is a failed sensor, not a desktop.
+        var hasBattery = false
         /// Failover gave up on the internet.
         var noInternet = false
     }
@@ -167,6 +172,8 @@ enum LidPolicy {
         if let percent = sensors.batteryPercent, percent <= max(LidSettings.minimumBatteryFloor, settings.batteryFloor) {
             return cut(.batteryLow(percent))
         }
+        // A battery that's there but can't be read could be at any level: don't guess.
+        if sensors.hasBattery && sensors.batteryPercent == nil { return cut(.batteryUnknown) }
         if input.lid.closed, let since = input.lid.awakeSince, now.timeIntervalSince(since) >= settings.maxAwake {
             return cut(.timeLimit)
         }

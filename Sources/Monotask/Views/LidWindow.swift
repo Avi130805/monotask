@@ -269,6 +269,7 @@ struct LidStatusRow: View {
         case .lowPowerMode: return "bolt.slash"
         case .onBattery: return "battery.75percent"
         case .batteryLow: return "battery.25percent"
+        case .batteryUnknown: return "battery.0percent"
         case .timeLimit: return "clock"
         case .noInternet: return "wifi.slash"
         }
