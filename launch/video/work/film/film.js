@@ -58,6 +58,7 @@
     return [clamp(cx, hw, 1920 - hw), clamp(cy, hh, 1080 - hh), z];
   }
   const WIDE = [960, 540, 1];
+  const RISE = 8;                     // terminal windows rise this far (world px) as they fade in
   const notchShot = (z, cx = 960) => { const c = camFor(z, cx, 0); return [c[0], c[1], z]; };
 
   // ---------------------------------------------------------------------------------- terminal
@@ -357,8 +358,20 @@
   let menuGroups = [];
   const measureMenus = () => (menuGroups = [...document.querySelectorAll("#menubar .menus, #menubar .clock")].map((el) => {
     const b = el.getBoundingClientRect();
-    return { el, x0: b.left, x1: b.right };
+    return { el, x0: b.left, x1: b.right, y0: b.top };
   }));
+
+  // Top edge (screen px) of the highest caption pill shown between t0 and t1, measured at rest.
+  function captionTop(t0, t1) {
+    let top = 1080;
+    for (const c of TL.captions) if (c.t1 + 0.25 > t0 && c.t0 < t1) {
+      capStep.textContent = c.step; capStep.style.display = c.step ? "block" : "none";
+      capLine.textContent = c.line;
+      capEl.style.transform = "translateX(-50%)";
+      top = Math.min(top, capEl.getBoundingClientRect().top);
+    }
+    return top;
+  }
 
   function buildCodexCard() {
     const card = document.createElement("div");
@@ -392,15 +405,42 @@
         st.cellH = cell.height; st.cellW = cell.width;
       }
     }
-    // camera keys onto the finish-line sentence, now that the terminal is measured
+    // Camera keys onto the finish-line sentence, now that the terminal is measured. Two framing rules
+    // hold in every terminal frame: a frame edge never cuts through a terminal row, and the caption pill
+    // never sits over terminal text. So the push-in puts the frame top just above row 0 (in the window's
+    // top padding) and zooms only as far as keeps the last row above the caption.
     const r1 = winEls.r1;
     if (r1 && TL.finishRowKey) {
-      const rowY = (row) => r1.y + 30 + 10 + (row + 0.5) * r1.st.cellH;
-      const fl = rowY(D.casts.r1.rowsAt.finishLine), offer = rowY(D.casts.r1.rowsAt.offer);
-      const z = CUT === "short" ? 1.45 : 1.38;
-      TL.cam.push({ t: TL.finishRowKey.t, v: camFor(z, r1.x + 14 + 52 * r1.st.cellW, fl + 30), response: 0.9 });
-      TL.cam.push({ t: TL.finishRowKey.back, v: camFor(CUT === "short" ? 1.2 : 1.12, 960, (fl + offer) / 2 + 40), response: 0.9 });
+      const w1 = TL.wins.find((w) => w.key === "r1");
+      const top0 = r1.y + 30 + 10, rowsBot = top0 + D.casts.r1.rows * r1.st.cellH;
+      const capTop = captionTop(w1.tIn, w1.tOut) - 14;       // screen px, with a little air
+      const fit = (z, y0) => {                               // frame top at world y0, zoom z
+        const c = camFor(z, 960, y0 + 540 / z);
+        return [c[0], c[1], z];
+      };
+      // push-in: frame top 6 px above row 0, zoom capped by the caption
+      const zIn = Math.min(CUT === "short" ? 1.45 : 1.38, capTop / (rowsBot - (top0 - 6)));
+      const push = fit(zIn, top0 - 6);
+      push[0] = camFor(zIn, r1.x + 14 + 52 * r1.st.cellW, push[1])[0];
+      // ease back: the original zoom, frame top as low as keeps every row above the caption (never below row 0)
+      const zBack = Math.min(CUT === "short" ? 1.2 : 1.12, zIn);
+      const back = fit(zBack, Math.max(0, Math.min(top0 - 6, rowsBot - capTop / zBack)));
+      TL.cam.push({ t: TL.finishRowKey.t, v: push, response: 0.9 });
+      TL.cam.push({ t: TL.finishRowKey.back, v: back, response: 0.9 });
       TL.cam.push({ t: TL.r1.added - 0.9, v: WIDE, response: 0.7 });
+      TL.cam.sort((a, b) => a.t - b.t);
+      // The window fades in only once the camera has pulled back far enough that no row is cut by the
+      // frame bottom and the bottom rows clear the caption (the cast itself starts later, unchanged).
+      const ok = (t, t0) => {
+        const [, cy, z] = keyed(TL.cam, t, 0.6);
+        const dy = (1 - springCrit(t - t0, 0.7)) * RISE;
+        return (rowsBot + dy - cy) * z + 540 <= capTop;
+      };
+      let tIn = w1.tIn;
+      const steps = [...Array(25).keys()].map((i) => (i + 1) / FPS);   // the visible first 0.83 s
+      while (tIn < w1.plan.t0 && !steps.every((d) => ok(tIn + d, tIn))) tIn += 1 / FPS;
+      w1.tIn = tIn;
+      TL.r1.zoom = { in: +zIn.toFixed(3), back: zBack, tIn: +tIn.toFixed(2), capTop, rowsBot };
     }
     TL.cam.sort((a, b) => a.t - b.t);
     TL.cursor.sort((a, b) => a.t - b.t);
@@ -431,7 +471,8 @@
     // In close-ups the menu titles or the clock would run off the frame edge: fade each group out
     // before any of it is cut, and back in as the camera pulls back.
     for (const g of menuGroups) {
-      const margin = Math.min((g.x0 - (cx - 960 / z)) * z, ((cx + 960 / z) - g.x1) * z);   // screen px
+      const margin = Math.min((g.x0 - (cx - 960 / z)) * z, ((cx + 960 / z) - g.x1) * z,   // screen px
+                              (g.y0 - (cy - 540 / z)) * z);                              // (terminal push-in)
       g.el.style.opacity = smooth((margin - 4) / 36);
     }
 
@@ -444,9 +485,9 @@
       const W = winEls[w.key];
       const pin = springCrit(t - w.tIn, 0.7), pout = springCrit(t - w.tOut, 0.7);
       let dx = 0, dy = 0;
-      if (w.from === "below") { dy = (1 - pin) * 260 + pout * 220; }
+      if (w.from === "below") { dy = (1 - pin + pout) * RISE; }
       else { dx = (1 - pin) * 900 + pout * -40; dy = pout * 160; }
-      const op = smooth((t - w.tIn) / 0.35) * (1 - smooth((t - w.tOut) / 0.45));
+      const op = smooth((t - w.tIn) / 0.35) * (1 - smooth((t - w.tOut) / (w.from === "below" ? 0.3 : 0.45)));
       W.el.style.display = op <= 0.001 ? "none" : "block";
       W.el.style.opacity = op;
       W.el.style.transform = `translate(${W.x + dx}px, ${W.y + dy}px)`;
