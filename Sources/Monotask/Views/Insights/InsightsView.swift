@@ -14,7 +14,7 @@ struct InsightsView: View {
             InsightsPage(range: $range)
         }
         .frame(minWidth: 700, minHeight: 560)
-        .background(InsightColors.background)
+        .background(WindowPalette.background)
     }
 }
 
@@ -45,7 +45,7 @@ struct InsightsPage: View {
                 HistoryCard(insights: insights)
             }
         }
-        .animation(.snappy, value: range)
+        .animation(Motion.content, value: range)
         .padding(.horizontal, 28)
         .padding(.top, 44)
         .padding(.bottom, 28)
@@ -57,7 +57,7 @@ struct InsightsPage: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Insights")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(Typeface.windowTitle)
                 Text(subtitle(insights))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -88,15 +88,15 @@ private struct StatTiles: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StatTile(symbol: "checkmark.circle.fill", tint: .green, title: "Finished",
+            StatTile(symbol: "checkmark.circle.fill", tint: WindowPalette.done, title: "Finished",
                      value: "\(insights.finished)", caption: finishedCaption)
-            StatTile(symbol: "target", tint: .blue, title: "Finish rate",
+            StatTile(symbol: "target", tint: WindowPalette.done, title: "Finish rate",
                      value: insights.finishRate.map { $0.formatted(.percent.precision(.fractionLength(0))) } ?? "–",
                      caption: "\(insights.finished) done, \(insights.dropped) dropped")
-            StatTile(symbol: "timer", tint: .orange, title: "Time to finish",
+            StatTile(symbol: "timer", tint: WindowPalette.accent, title: "Time to finish",
                      value: insights.medianTimeToFinish.map(Elapsed.duration) ?? "–",
                      caption: "Typical, from start to done")
-            StatTile(symbol: "flame.fill", tint: .pink, title: "Streak",
+            StatTile(symbol: "flame.fill", tint: WindowPalette.accent, title: "Streak",
                      value: days(insights.streak), caption: "Best: \(days(insights.bestStreak))")
         }
     }
@@ -128,7 +128,7 @@ private struct StatTile: View {
             }
             .font(.subheadline.weight(.medium))
             Text(value)
-                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .font(Typeface.statValue)
                 .monospacedDigit()
                 .contentTransition(.numericText())
                 .lineLimit(1)
@@ -157,6 +157,7 @@ private struct Counts: View {
             Label("\(insights.deleted) deleted", systemImage: "trash")
         }
         .font(.callout)
+        .monospacedDigit()
         .foregroundStyle(.secondary)
         .padding(.horizontal, 4)
     }
@@ -173,7 +174,7 @@ private struct FinishedChart: View {
                 ForEach(insights.timeline) { point in
                     BarMark(x: .value("Date", point.date, unit: insights.timelineUnit),
                             y: .value("Finished", point.count))
-                        .foregroundStyle(Color.green.gradient)
+                        .foregroundStyle(WindowPalette.done.gradient)
                         .cornerRadius(4)
                 }
                 if average > 0 {
@@ -228,7 +229,7 @@ private struct HourChart: View {
             Chart(Array(insights.finishesByHour.enumerated()), id: \.offset) { item in
                 BarMark(x: .value("Hour", hour(item.offset), unit: .hour),
                         y: .value("Finished", item.element))
-                    .foregroundStyle(item.offset == insights.peakHour ? Color.green : Color.green.opacity(0.35))
+                    .foregroundStyle(item.offset == insights.peakHour ? WindowPalette.done : WindowPalette.doneMuted)
                     .cornerRadius(3)
             }
             .chartXAxis {
@@ -258,11 +259,11 @@ private struct DurationChart: View {
         InsightCard(title: "Time to finish", subtitle: subtitle) {
             Chart(insights.timeToFinish) { bucket in
                 BarMark(x: .value("Tasks", bucket.count), y: .value("Time", bucket.label))
-                    .foregroundStyle(Color.orange.gradient)
+                    .foregroundStyle(WindowPalette.accent.gradient)
                     .cornerRadius(4)
                     .annotation(position: .trailing, spacing: 4) {
                         Text("\(bucket.count)")
-                            .font(.caption)
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
             }
@@ -288,7 +289,7 @@ private struct FlowChart: View {
                     .position(by: .value("Series", point.series))
                     .cornerRadius(3)
             }
-            .chartForegroundStyleScale([Insights.cameIn: Color.gray.opacity(0.55), Insights.gotDone: Color.green])
+            .chartForegroundStyleScale([Insights.cameIn: WindowPalette.neutral, Insights.gotDone: WindowPalette.done])
             .chartLegend(position: .top, alignment: .leading)
             .chartXAxis {
                 AxisMarks(values: .stride(by: .weekOfYear, count: weeks > 10 ? 4 : 1)) { _ in
@@ -359,7 +360,7 @@ private struct HistoryCard: View {
                 if insights.runs.count > shortList {
                     Divider()
                     Button(showAll ? "Show fewer" : "Show all \(insights.runs.count)") {
-                        withAnimation(.snappy) { showAll.toggle() }
+                        withAnimation(Motion.content) { showAll.toggle() }
                     }
                     .buttonStyle(.link)
                     .padding(.top, 10)
@@ -383,7 +384,7 @@ private struct HistoryRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: run.finished ? "checkmark.circle.fill" : "xmark.circle")
-                .foregroundStyle(run.finished ? Color.green : Color.secondary)
+                .foregroundStyle(run.finished ? WindowPalette.done : Color.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(run.title)
                     .strikethrough(!run.finished)
@@ -456,22 +457,10 @@ private struct InsightCard<Content: View>: View {
 private struct CardBackground: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(InsightColors.card)
+            .fill(WindowPalette.card)
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+                    .strokeBorder(WindowPalette.cardStroke, lineWidth: 1)
             )
-    }
-}
-
-/// Grouped style, like System Settings: white cards on grey in light mode, lighter cards on near-black in dark.
-enum InsightColors {
-    static let background = adaptive(light: NSColor(white: 0.955, alpha: 1), dark: NSColor(white: 0.11, alpha: 1))
-    static let card = adaptive(light: .white, dark: NSColor(white: 0.17, alpha: 1))
-
-    private static func adaptive(light: NSColor, dark: NSColor) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
-        })
     }
 }

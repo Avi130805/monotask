@@ -42,7 +42,7 @@ struct CompactWings: View {
                 ZStack {
                     if wingsVisible, let now = store.now {
                         ElapsedText(since: now.startedAt)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(Typeface.subheadline.weight(.semibold))
                             .foregroundStyle(Palette.accent)
                             .fixedSize()
                             .transition(.wing(.trailing))
@@ -71,27 +71,27 @@ struct CompactWings: View {
                     Image(systemName: flash.symbol).font(.system(size: 11, weight: .bold))
                     Text(flash.text)
                 }
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(Typeface.callout.weight(.semibold))
                 .foregroundStyle(flash.tint)
             case .task(let title, let doneWhen):
                 VStack(spacing: 3) {
                     Text(title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Typeface.headline)
                         .foregroundStyle(Palette.primary)
                     HStack(spacing: 4) {
                         Image(systemName: "flag.checkered").font(.system(size: 9.5, weight: .semibold))
                         Text(doneWhen)
                     }
-                    .font(.system(size: 11.5))
+                    .font(Typeface.footnote)
                     .foregroundStyle(Palette.secondary)
                 }
             case .nextUp(let title):
                 VStack(spacing: 3) {
                     Text("Next up")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Typeface.caption)
                         .foregroundStyle(Palette.tertiary)
                     Text(title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Typeface.headline)
                         .foregroundStyle(Palette.primary)
                 }
             case .hint:
@@ -99,7 +99,7 @@ struct CompactWings: View {
                     Text("Capture a thought")
                     if !model.hotKeyLabel.isEmpty { KeyCap(model.hotKeyLabel) }
                 }
-                .font(.system(size: 12.5, weight: .medium))
+                .font(Typeface.callout.weight(.medium))
                 .foregroundStyle(Palette.secondary)
             }
         }

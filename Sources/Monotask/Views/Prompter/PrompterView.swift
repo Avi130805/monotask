@@ -34,13 +34,13 @@ struct PrompterHeader: View {
             HStack(spacing: 7) {
                 if let label = prompter.currentSection?.label, !label.isEmpty {
                     Text(label)
-                        .font(.system(size: 11.5, weight: .bold))
-                        .kerning(0.4)
+                        .font(Typeface.footnote.weight(.bold))
+                        .kerning(Typeface.capsTracking)
                         .foregroundStyle(Palette.accent)
                         .lineLimit(1)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Capsule().fill(Palette.accent.opacity(0.14)))
+                        .background(Capsule().fill(Palette.wash(Palette.accent)))
                 }
                 if prompter.script.sections.count > 1 {
                     Text("\(prompter.section + 1)/\(prompter.script.sections.count)")
@@ -67,7 +67,7 @@ struct PrompterHeader: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .font(.system(size: 12.5, weight: .semibold))
+        .font(Typeface.callout.weight(.semibold))
         .padding(.horizontal, 4)
     }
 }
@@ -75,7 +75,6 @@ struct PrompterHeader: View {
 /// The middle, straight under the lens: the countdown, a cue or a word, a look flash, or the end.
 struct PrompterStage: View {
     @Environment(Prompter.self) var prompter
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         ZStack {
@@ -92,7 +91,7 @@ struct PrompterStage: View {
                     ZStack {
                         CueCard(section: prompter.section)
                             .id(prompter.section)
-                            .transition(reduceMotion ? .opacity : .softSwap)
+                            .transition(.softSwap)
                     }
                     .animation(Motion.content, value: prompter.section)
                 } else {
@@ -121,7 +120,7 @@ struct CueCard: View {
                 CueCard.line(cues)
             }
         }
-        .font(.system(size: 28, weight: .semibold))
+        .font(Typeface.cue)
         .foregroundStyle(Palette.primary)
         .multilineTextAlignment(.center)
         .lineSpacing(3)
@@ -153,7 +152,7 @@ struct LineCard: View {
 
     var body: some View {
         LineCard.line(frame.tokens)
-            .font(.system(size: 30, weight: .semibold))
+            .font(Typeface.line)
             .multilineTextAlignment(.center)
             .lineSpacing(4)
             .lineLimit(2)
@@ -171,11 +170,11 @@ struct LineCard: View {
             case (.now, false):
                 piece = piece.foregroundStyle(token.emphasis ? Palette.accent : Palette.primary).fontWeight(.bold)
             case (.said, _):
-                piece = piece.foregroundStyle(Color.white.opacity(0.32))
+                piece = piece.foregroundStyle(Palette.Script.said)
             case (.ahead, true):
-                piece = piece.foregroundStyle(Palette.accent.opacity(0.55))
+                piece = piece.foregroundStyle(Palette.Script.aheadPause)
             case (.ahead, false):
-                piece = piece.foregroundStyle(token.emphasis ? Palette.accent.opacity(0.8) : Color.white.opacity(0.7))
+                piece = piece.foregroundStyle(token.emphasis ? Palette.Script.aheadEmphasis : Palette.Script.ahead)
             }
             line = index == 0 ? piece : Text("\(line) \(piece)")
         }
@@ -195,8 +194,8 @@ struct WordCard: View {
                 .minimumScaleFactor(0.5)
             if let next = frame.next {
                 Text(verbatim: next.text)
-                    .font(.system(size: 28, weight: next.emphasis ? .semibold : .medium))
-                    .foregroundStyle(Color.white.opacity(0.28))
+                    .font(Typeface.cue.weight(next.emphasis ? .semibold : .medium))
+                    .foregroundStyle(Palette.Script.nextWord)
                     .lineLimit(1)
                     .fixedSize()
             }
@@ -207,15 +206,15 @@ struct WordCard: View {
     @ViewBuilder private var main: some View {
         if frame.beat {
             Text(verbatim: "…")
-                .font(.system(size: 46, weight: .semibold))
+                .font(Typeface.word)
                 .foregroundStyle(Palette.secondary)
         } else if let word = frame.word {
             Text(verbatim: word.text)
-                .font(.system(size: 46, weight: word.emphasis ? .bold : .semibold))
+                .font(Typeface.word.weight(word.emphasis ? .bold : .semibold))
                 .foregroundStyle(word.emphasis ? Palette.accent : Palette.primary)
                 .opacity(frame.resting ? 0.45 : 1)
         } else {
-            Text(verbatim: " ").font(.system(size: 46))
+            Text(verbatim: " ").font(Typeface.word)
         }
     }
 }
@@ -252,11 +251,11 @@ struct Countdown: View {
     var body: some View {
         VStack(spacing: 2) {
             Text("\(count)")
-                .font(.system(size: 58, weight: .semibold, design: .rounded))
+                .font(Typeface.countdown)
                 .monospacedDigit()
                 .foregroundStyle(Palette.primary)
             Text(prompter.startCaption)
-                .font(.system(size: 14, weight: .medium))
+                .font(Typeface.prompterCaption)
                 .foregroundStyle(Palette.secondary)
                 .lineLimit(1)
         }
@@ -272,10 +271,10 @@ struct LookFlash: View {
             Text("look at the lens")
             Image(systemName: "arrow.up")
         }
-        .font(.system(size: 28, weight: .semibold))
+        .font(Typeface.cue)
         .foregroundStyle(Palette.accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Palette.accent.opacity(0.15)))
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Palette.wash(Palette.accent)))
         .padding(.vertical, 6)
     }
 }
@@ -289,10 +288,10 @@ struct FinishedCard: View {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.done)
                 Text("End of script")
             }
-            .font(.system(size: 26, weight: .semibold))
+            .font(Typeface.banner)
             .foregroundStyle(Palette.primary)
             Text("\(Prompter.time(prompter.elapsed)) spoken · budget \(Prompter.time(prompter.totalBudget))")
-                .font(.system(size: 14, weight: .medium))
+                .font(Typeface.prompterCaption)
                 .monospacedDigit()
                 .foregroundStyle(prompter.isOverBudget ? Palette.accent : Palette.secondary)
         }
@@ -332,13 +331,12 @@ struct NoteTag: View {
 
     var body: some View {
         Text(verbatim: text)
-            .font(.system(size: 17, weight: .medium))
-            .italic()
+            .font(Typeface.note)
             .foregroundStyle(Palette.note)
             .lineLimit(1)
             .padding(.horizontal, 12)
             .padding(.vertical, 3)
-            .background(Capsule().fill(Palette.note.opacity(0.14)))
+            .background(Capsule().fill(Palette.wash(Palette.note)))
     }
 }
 
@@ -351,7 +349,7 @@ struct SpeedTag: View {
             Image(systemName: slow ? "tortoise.fill" : "hare.fill")
             Text(slow ? "slower" : "faster")
         }
-        .font(.system(size: 14, weight: .semibold))
+        .font(Typeface.prompterCaption.weight(.semibold))
         .foregroundStyle(Palette.note)
     }
 }
@@ -369,7 +367,7 @@ struct KeyLegend: View {
                 .fixedSize()
             }
         }
-        .font(.system(size: 11.5, weight: .medium))
+        .font(Typeface.footnote.weight(.medium))
         .foregroundStyle(Palette.tertiary)
         .lineLimit(1)
     }
@@ -389,7 +387,7 @@ struct PrompterProgress: View {
                     let length = max(0, (span.upperBound - span.lowerBound) * width - 3)
                     let filled = min(max((progress - span.lowerBound) / (span.upperBound - span.lowerBound), 0), 1)
                     Capsule()
-                        .fill(Color.white.opacity(0.13))
+                        .fill(Palette.raisedHover)
                         .overlay(alignment: .leading) {
                             Capsule().fill(Palette.secondary).frame(width: length * filled)
                         }

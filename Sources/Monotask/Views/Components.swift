@@ -7,8 +7,9 @@ struct SectionLabel: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .kerning(0.2)
+            .font(Typeface.caption)
+            .kerning(Typeface.captionTracking)
+            .monospacedDigit()
             .foregroundStyle(Palette.tertiary)
     }
 }
@@ -37,7 +38,7 @@ struct PillButton: View {
                 }
                 Text(title)
             }
-            .font(.system(size: 12.5, weight: .semibold))
+            .font(Typeface.callout.weight(.semibold))
             .foregroundStyle(foreground)
             .padding(.horizontal, 13)
             .frame(height: 28)
@@ -51,7 +52,7 @@ struct PillButton: View {
 
     private var foreground: Color {
         switch style {
-        case .primary: .black
+        case .primary: Palette.onFill
         case .secondary: Palette.primary
         case .destructive: Palette.danger
         }
@@ -59,9 +60,9 @@ struct PillButton: View {
 
     private var background: Color {
         switch style {
-        case .primary: .white.opacity(hovering ? 1 : 0.9)
-        case .secondary: .white.opacity(hovering ? 0.16 : 0.1)
-        case .destructive: Palette.danger.opacity(hovering ? 0.26 : 0.16)
+        case .primary: hovering ? Palette.primaryFillHover : Palette.primaryFill
+        case .secondary: hovering ? Palette.raisedHover : Palette.raised
+        case .destructive: hovering ? Palette.washHover(Palette.danger) : Palette.wash(Palette.danger)
         }
     }
 }
@@ -86,7 +87,7 @@ struct IconButton: View {
                 .frame(width: 26, height: 22)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.white.opacity(hovering ? 0.14 : 0))
+                        .fill(Palette.raisedHover.opacity(hovering ? 1 : 0))
                 )
                 .contentShape(Rectangle())
         }
@@ -103,12 +104,12 @@ struct KeyCap: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+            .font(Typeface.keyCap)
             .foregroundStyle(Palette.tertiary)
             .padding(.horizontal, 6)
             .padding(.vertical, 2.5)
-            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.white.opacity(0.07)))
-            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Palette.card))
+            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Palette.rule, lineWidth: 0.5))
     }
 }
 
@@ -126,7 +127,7 @@ struct NotchField: View {
     var body: some View {
         TextField("", text: $text, prompt: Text(prompt).foregroundStyle(Palette.tertiary))
             .textFieldStyle(.plain)
-            .font(.system(size: 13.5))
+            .font(Typeface.body)
             .foregroundStyle(Palette.primary)
             .focused(focus, equals: id)
             .onSubmit(onSubmit)
@@ -134,11 +135,11 @@ struct NotchField: View {
             .frame(height: 34)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(active ? 0.11 : 0.065))
+                    .fill(active ? Palette.raised : Palette.card)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.white.opacity(active ? 0.2 : 0.05), lineWidth: 1)
+                    .strokeBorder(active ? Palette.focusRing : Palette.hairline, lineWidth: 1)
             )
             .contentShape(Rectangle())
             .simultaneousGesture(TapGesture().onEnded {
@@ -157,11 +158,11 @@ struct BlockedTag: View {
             Image(systemName: "pause.fill").font(.system(size: 7.5, weight: .bold))
             Text("Blocked")
         }
-        .font(.system(size: 10.5, weight: .semibold))
+        .font(Typeface.micro)
         .foregroundStyle(Palette.blocked)
         .padding(.horizontal, 7)
         .padding(.vertical, 2.5)
-        .background(Capsule().fill(Palette.blocked.opacity(0.14)))
+        .background(Capsule().fill(Palette.wash(Palette.blocked)))
         .help("Blocked: \(reason)")
     }
 }
@@ -172,7 +173,7 @@ struct ErrorLine: View {
     var body: some View {
         if let text {
             Text(text)
-                .font(.system(size: 12, weight: .medium))
+                .font(Typeface.subheadline.weight(.medium))
                 .foregroundStyle(Palette.danger)
                 .transition(.opacity)
         }
@@ -183,7 +184,7 @@ struct ErrorLine: View {
 struct LiveDot: View {
     var body: some View {
         ZStack {
-            Circle().fill(Palette.accent.opacity(0.22)).frame(width: 13, height: 13)
+            Circle().fill(Palette.halo(Palette.accent)).frame(width: 13, height: 13)
             Circle().fill(Palette.accent).frame(width: 7, height: 7)
         }
     }

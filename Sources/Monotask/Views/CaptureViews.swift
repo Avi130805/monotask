@@ -22,7 +22,7 @@ struct CaptureField: View {
                       prompt: Text(confirmation ?? "Capture a thought…")
                           .foregroundStyle(confirmation == nil ? Palette.tertiary : Palette.done))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13.5))
+                .font(Typeface.body)
                 .foregroundStyle(Palette.primary)
                 .focused($focus, equals: .capture)
                 .onSubmit(submit)
@@ -36,11 +36,11 @@ struct CaptureField: View {
         .frame(height: 36)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(active ? 0.11 : 0.065))
+                .fill(active ? Palette.raised : Palette.card)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.white.opacity(active ? 0.18 : 0), lineWidth: 1)
+                .strokeBorder(Palette.focusRing.opacity(active ? 1 : 0), lineWidth: 1)
         )
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded {
@@ -96,7 +96,7 @@ struct CaptureBar: View {
                 Spacer(minLength: 12)
                 Text("esc to cancel")
             }
-            .font(.system(size: 11.5))
+            .font(Typeface.footnote)
             .foregroundStyle(Palette.tertiary)
             .padding(.horizontal, 4)
         }
