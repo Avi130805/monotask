@@ -201,7 +201,7 @@
     C(0, CHIN_HOVER);
     K(0, notchShot(ZMAX));
     K(0.6, notchShot(1.3), 3.2);
-    cap(0.5, 3.85, "", "One task. One finish line. Your coding agents know both.");
+    cap(0.5, 3.85, "", "One task. One finish line.\nYour coding agents know both.");
 
     // 2 · capture (4-11 s)
     C(4.0, REST, 0.7);
@@ -215,7 +215,7 @@
     T.keys.push({ t: 7.9, keys: ["Return"] });
     N(8.0, "v04-flash-added");
     N(10.3, "v01-closed-idle");
-    cap(4.4, 10.75, "1 · Capture", "⌥Space from any app. Type it, press Return. It waits in Do Next.");
+    cap(4.4, 10.75, "1 · Capture", "⌥Space from any app.\nType it, press Return. It waits in Do Next.");
 
     // 3 · start one task (11-21 s)
     K(10.9, [960, 540 / 1.42, 1.42]);
@@ -239,7 +239,7 @@
     K(21.0, notchShot(ZMAX));
     C(22.3, CHIN_HOVER, 0.7);
     N(23.0, "v09-peek-chin");
-    cap(21.2, 24.85, "2 · Start one task", "It sits in your notch. Hover to see the task and its finish line.");
+    cap(21.2, 24.85, "2 · Start one task", "It sits in your notch.\nHover to see the task and its finish line.");
 
     // 5 · Claude Code (25-~47 s)
     C(25.0, REST, 0.7);
@@ -303,7 +303,7 @@
     C(0, CHIN_HOVER);
     K(0, notchShot(ZMAX));
     K(0.4, notchShot(1.4), 2.6);
-    cap(0.15, 2.9, "", "One task. One finish line. Your coding agents know both.");
+    cap(0.15, 2.9, "", "One task. One finish line.\nYour coding agents know both.");
 
     C(2.9, REST, 0.6);
     N(3.0, "v08-closed-wings");
@@ -353,6 +353,12 @@
   const keysEl = document.getElementById("keys");
   const endEl = document.getElementById("endcard");
   let TL, winEls = {};
+  // Menu-bar groups (titles, clock) with their world-space x extent, measured before any camera move.
+  let menuGroups = [];
+  const measureMenus = () => (menuGroups = [...document.querySelectorAll("#menubar .menus, #menubar .clock")].map((el) => {
+    const b = el.getBoundingClientRect();
+    return { el, x0: b.left, x1: b.right };
+  }));
 
   function buildCodexCard() {
     const card = document.createElement("div");
@@ -367,6 +373,7 @@
     await document.fonts.load('18px "JetBrains Mono"');
     await document.fonts.load('700 18px "JetBrains Mono"');
     for (const w of [400, 500, 600, 700]) await document.fonts.load(`${w} 34px "Inter"`);
+    measureMenus();
     await Promise.all(Object.values(imgs).map((i) => i.decode()));
     await holdOverlay.decode();
     TL = CUT === "short" ? shortTimeline() : guideTimeline();
@@ -421,6 +428,12 @@
     // camera
     const [cx, cy, z] = keyed(TL.cam, t, 0.6);
     world.style.transform = `translate(960px, 540px) scale(${z}) translate(${-cx}px, ${-cy}px)`;
+    // In close-ups the menu titles or the clock would run off the frame edge: fade each group out
+    // before any of it is cut, and back in as the camera pulls back.
+    for (const g of menuGroups) {
+      const margin = Math.min((g.x0 - (cx - 960 / z)) * z, ((cx + 960 / z) - g.x1) * z);   // screen px
+      g.el.style.opacity = smooth((margin - 4) / 36);
+    }
 
     // notch
     notchEl.style.transform = `translate(${notchLeft}px, 0px) scale(${S})`;
