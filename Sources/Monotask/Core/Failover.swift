@@ -522,8 +522,42 @@ protocol ConnectivityProbing: Sendable {
 }
 
 protocol WiFiControlling: Sendable {
+    /// `.done` only once Wi-Fi is confirmed back on.
     func powerCycle(device: String) -> Failover.ActionOutcome
     func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome
+    /// Turns Wi-Fi on if it isn't. True once it's confirmed on.
+    func ensureOn(device: String) -> Bool
+}
+
+/// Remembers whether Wi-Fi might have been left off by a power cycle that didn't confirm it came back, and when to
+/// try turning it on again: before any join, and whenever failover isn't running.
+struct WiFiPowerGuard: Equatable {
+    private(set) var unconfirmed = false
+    private var ensuring = false
+    private var lastTry: Date?
+    /// Between tries to turn Wi-Fi back on that failed.
+    static let retryAfter: TimeInterval = 60
+
+    mutating func cycleStarted() { unconfirmed = true }
+
+    /// `.done` confirmed it's on; `.unavailable` means it was never turned off. Anything else leaves it unknown.
+    mutating func cycleFinished(_ outcome: Failover.ActionOutcome) {
+        if outcome == .done || outcome == .unavailable { unconfirmed = false }
+    }
+
+    func shouldEnsure(failoverActive: Bool, now: Date) -> Bool {
+        unconfirmed && !failoverActive && !ensuring && (lastTry.map { now.timeIntervalSince($0) >= Self.retryAfter } ?? true)
+    }
+
+    mutating func ensureStarted(now: Date) {
+        ensuring = true
+        lastTry = now
+    }
+
+    mutating func ensureFinished(confirmed: Bool) {
+        ensuring = false
+        if confirmed { unconfirmed = false }
+    }
 }
 
 protocol WiFiPasswordStoring: Sendable {
@@ -591,10 +625,28 @@ struct NetworkSetupWiFi: WiFiControlling {
         if Self.needsAdmin(off) { return .unavailable }
         guard off.status == 0 else { return .failed }
         Thread.sleep(forTimeInterval: 3)
-        let on = Self.run(["-setairportpower", device, "on"])
-        // If turning it back on fails, try once more: Wi-Fi must never be left off.
-        if on.status != 0 { _ = Self.run(["-setairportpower", device, "on"]) }
-        return on.status == 0 ? .done : .failed
+        // Wi-Fi must never be left off: turn it on, and say done only once it reads back on (the app tries again later
+        // if it doesn't).
+        return ensureOn(device: device) ? .done : .failed
+    }
+
+    func ensureOn(device: String) -> Bool {
+        for attempt in 0..<2 {
+            if Self.isOn(airportPower: Self.run(["-getairportpower", device]).output) == true { return true }
+            if attempt == 1 { break }
+            _ = Self.run(["-setairportpower", device, "on"])
+            Thread.sleep(forTimeInterval: 1)
+        }
+        return Self.isOn(airportPower: Self.run(["-getairportpower", device]).output) == true
+    }
+
+    /// `networksetup -getairportpower <dev>`: "Wi-Fi Power (en0): On". nil for anything else.
+    static func isOn(airportPower text: String) -> Bool? {
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix("Wi-Fi Power ") || line.hasPrefix("AirPort Power ") else { return nil }
+        if line.hasSuffix(": On") { return true }
+        if line.hasSuffix(": Off") { return false }
+        return nil
     }
 
     func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome {

@@ -1765,6 +1765,16 @@ private struct FakeProber: ConnectivityProbing {
 private struct FakeWiFi: WiFiControlling {
     func powerCycle(device: String) -> Failover.ActionOutcome { .failed }
     func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome { .failed }
+    func ensureOn(device: String) -> Bool { true }
+}
+
+/// Records what it's asked to do, in order.
+private final class RecordingWiFi: WiFiControlling, @unchecked Sendable {
+    var calls: [String] = []
+    var on = true
+    func powerCycle(device: String) -> Failover.ActionOutcome { calls.append("cycle \(device)"); return .failed }
+    func join(device: String, ssid: String, password: String?) -> Failover.ActionOutcome { calls.append("join \(device) \(ssid)"); return .done }
+    func ensureOn(device: String) -> Bool { calls.append("on \(device)"); return on }
 }
 
 extension SelfTest {
@@ -2021,6 +2031,40 @@ extension SelfTest {
         controller.removeFallback("Studio Wi-Fi")
         check(controller.fallbacks == ["Avi's iPhone"] && passwords.stored["Studio Wi-Fi"] == nil,
               "removing a network deletes its password too")
+
+        // Wi-Fi is never left off after a power cycle that didn't confirm it came back.
+        var power = WiFiPowerGuard()
+        check(!power.unconfirmed, "Wi-Fi power starts confirmed")
+        power.cycleStarted()
+        check(power.unconfirmed, "a power cycle in flight leaves Wi-Fi unconfirmed")
+        power.cycleFinished(.failed)
+        check(power.unconfirmed, "…and a failed one keeps it so")
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        check(power.shouldEnsure(failoverActive: false, now: t) && !power.shouldEnsure(failoverActive: true, now: t),
+              "when failover goes inactive with Wi-Fi unconfirmed, it's turned back on")
+        power.ensureStarted(now: t)
+        check(!power.shouldEnsure(failoverActive: false, now: t + 30), "one try at a time")
+        power.ensureFinished(confirmed: false)
+        check(!power.shouldEnsure(failoverActive: false, now: t + 30) && power.shouldEnsure(failoverActive: false, now: t + 61),
+              "a try that fails is repeated a minute later")
+        power.ensureFinished(confirmed: true)
+        check(!power.unconfirmed && !power.shouldEnsure(failoverActive: false, now: t + 120), "once Wi-Fi is confirmed on, nothing more")
+        power.cycleStarted()
+        power.cycleFinished(.done)
+        check(!power.unconfirmed, "a power cycle that confirmed Wi-Fi came back on needs nothing more")
+        power.cycleStarted()
+        power.cycleFinished(.unavailable)
+        check(!power.unconfirmed, "a power cycle macOS refused never turned Wi-Fi off")
+        let recorder = RecordingWiFi()
+        _ = LidController.performJoin(wifi: recorder, device: "en0", ssid: "Cafe", ensureFirst: true)
+        check(recorder.calls == ["on en0", "join en0 Cafe"], "before a join after an unconfirmed power cycle, Wi-Fi is turned on first")
+        recorder.calls = []
+        _ = LidController.performJoin(wifi: recorder, device: "en0", ssid: "Cafe", ensureFirst: false)
+        check(recorder.calls == ["join en0 Cafe"], "otherwise the join goes straight ahead")
+        check(NetworkSetupWiFi.isOn(airportPower: "Wi-Fi Power (en0): On\n") == true
+              && NetworkSetupWiFi.isOn(airportPower: "Wi-Fi Power (en0): Off\n") == false
+              && NetworkSetupWiFi.isOn(airportPower: "en0 is not a Wi-Fi interface.\n") == nil,
+              "networksetup -getairportpower is read: On, Off, or unknown")
 
         controller.evaluate(activity: one)
         check(leaseText() != nil, "a lease is held before quitting")

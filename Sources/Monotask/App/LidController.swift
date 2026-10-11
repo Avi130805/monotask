@@ -85,6 +85,7 @@ final class LidController {
     @ObservationIgnored private var failover: Failover
     @ObservationIgnored private var passwordCache: [String: String] = [:]
     @ObservationIgnored private var wifiDevice: String?
+    @ObservationIgnored private var wifiPower = WiFiPowerGuard()
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var napGuard: NSObjectProtocol?
@@ -313,6 +314,7 @@ final class LidController {
             && (decision.keepAwake || (decision.latch == .noInternet && failover.noInternet))
         let ledgerBefore = failover.ledger
         failover.setActive(failoverActive, now: now)
+        if wifiPower.shouldEnsure(failoverActive: failoverActive, now: now) { ensureWiFiOn(now: now) }
         run(failover.tick(now: now))
         if failover.ledger != ledgerBefore { failover.ledger.save(defaults) }
         let text = settings.failover ? failover.status(now: now) : ""
@@ -387,19 +389,55 @@ final class LidController {
                     }
                 }
             case .powerCycle(let generation):
-                act(generation: generation) { wifi, device in wifi.powerCycle(device: device) }
+                // (`act` refuses with the lid open, and then nothing is turned off.)
+                if machine.lidClosed() == true { wifiPower.cycleStarted() }
+                act(generation: generation) { wifi, device in
+                    let outcome = wifi.powerCycle(device: device)
+                    return (outcome, outcome == .done || outcome == .unavailable ? true : nil)
+                }
             case .join(let ssid, let generation):
                 let cached = passwordCache[ssid]
                 let passwords = self.passwords
+                let ensureFirst = wifiPower.unconfirmed
                 act(generation: generation) { wifi, device in
-                    wifi.join(device: device, ssid: ssid, password: cached ?? passwords.password(for: ssid, interactive: false))
+                    Self.performJoin(wifi: wifi, device: device, ssid: ssid, ensureFirst: ensureFirst,
+                                     password: cached ?? passwords.password(for: ssid, interactive: false))
+                }
+            }
+        }
+    }
+
+    /// A join, after turning Wi-Fi back on first if a power cycle left it unconfirmed. Returns the join's outcome and,
+    /// if it was checked, whether Wi-Fi is confirmed on.
+    nonisolated static func performJoin(wifi: WiFiControlling, device: String, ssid: String, ensureFirst: Bool,
+                                        password: String? = nil) -> (Failover.ActionOutcome, Bool?) {
+        let confirmed = ensureFirst ? wifi.ensureOn(device: device) : nil
+        return (wifi.join(device: device, ssid: ssid, password: password), confirmed)
+    }
+
+    /// Turns Wi-Fi back on, off the main thread, after a power cycle that didn't confirm it. Lid open or closed: it
+    /// only ever turns Wi-Fi on.
+    private func ensureWiFiOn(now: Date) {
+        wifiPower.ensureStarted(now: now)
+        if commandSink != nil {
+            wifiPower.ensureFinished(confirmed: false)
+            return
+        }
+        let wifi = self.wifi
+        let known = wifiDevice
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let device = known ?? NetworkSetupWiFi.wifiDevice()
+            let confirmed = device.map { wifi.ensureOn(device: $0) } ?? false
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.wifiPower.ensureFinished(confirmed: confirmed)
                 }
             }
         }
     }
 
     /// Runs a Wi-Fi action off the main thread, never with the lid open, and reports back with its generation.
-    private func act(generation: Int, _ body: @escaping @Sendable (WiFiControlling, String) -> Failover.ActionOutcome) {
+    private func act(generation: Int, _ body: @escaping @Sendable (WiFiControlling, String) -> (Failover.ActionOutcome, Bool?)) {
         guard machine.lidClosed() == true else {
             evaluate()
             return
@@ -408,11 +446,12 @@ final class LidController {
         let known = wifiDevice
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let device = known ?? NetworkSetupWiFi.wifiDevice()
-            let outcome = device.map { body(wifi, $0) } ?? .unavailable
+            let (outcome, wifiOn) = device.map { body(wifi, $0) } ?? (.unavailable, nil)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     if let device { self.wifiDevice = device }
+                    if let wifiOn { self.wifiPower.ensureFinished(confirmed: wifiOn) }
                     let next = self.failover.finished(outcome, generation: generation, now: self.machine.now())
                     self.run(next)
                     self.evaluate()
