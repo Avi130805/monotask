@@ -1226,6 +1226,10 @@ extension SelfTest {
           -g) [ -e "$D/pmset-g-fails" ] && exit 1
               printf 'System-wide power settings:\\n SleepDisabled\\t\\t%s\\nCurrently in use:\\n sleep 1\\n' "$(cat "$D/flag")" ;;
           -a) [ -e "$D/pmset-a-fails" ] && exit 1
+              [ -e "$D/pmset-a-ignored" ] && exit 0
+              # pmset-slow: turning sleep off takes a second and commits last, even if pmset itself is signalled
+              # (the real change is made by powerd once pmset has asked).
+              if [ "$3" = 1 ] && [ -e "$D/pmset-slow" ]; then trap '' TERM HUP INT; /bin/sleep 1; fi
               [ "$2" = disablesleep ] && printf '%s' "$3" >"$D/flag" ;;
         esac
         exit 0
@@ -1252,7 +1256,7 @@ extension SelfTest {
             put("lid", lid)
             put("causes", causes)
             put("pmset.log", "")
-            for file in ["pmset-g-fails", "pmset-a-fails"] { try? files.removeItem(at: scratch.appendingPathComponent(file)) }
+            for file in ["pmset-g-fails", "pmset-a-fails", "pmset-a-ignored", "pmset-slow"] { try? files.removeItem(at: scratch.appendingPathComponent(file)) }
             for file in [owned, capped, lease] { try? files.removeItem(at: file) }
         }
         func epoch(_ offset: TimeInterval = 0) -> Int { Int(Date().timeIntervalSince1970 + offset) }
@@ -1305,7 +1309,8 @@ extension SelfTest {
         fresh(flag: "1")
         try? Data("\(epoch(-60))\n".utf8).write(to: owned)
         run(once: "boot")
-        check(flag() == "0" && !isOwned() && log() == "-a disablesleep 0\n", rule("at start a setting it left behind is cleared"))
+        check(flag() == "0" && !isOwned() && log() == "-a disablesleep 0\n-g\n",
+              rule("at start a setting it left behind is cleared, and read back before the marker goes"))
         fresh(flag: "1")
         run(once: "boot")
         check(flag() == "1" && log().isEmpty, rule("at start a setting someone else made is left alone"))
@@ -1435,6 +1440,11 @@ extension SelfTest {
         try? files.removeItem(at: lease)
         run()
         check(!isOwned() && flag() == "0", rule("…and the marker goes once there's nothing to undo"))
+        fresh(flag: "1")
+        try? Data("\(epoch(-60))\n".utf8).write(to: owned)
+        put("pmset-a-ignored", "")
+        run(once: "boot")
+        check(flag() == "1" && isOwned(), rule("a turn-on that pmset reports done but doesn't read back keeps the marker, to retry"))
 
         // Being stopped.
         fresh()
@@ -1450,6 +1460,27 @@ extension SelfTest {
         } else {
             check(false, rule("the helper can be started in a loop for the TERM test"))
         }
+
+        // Stopped while a slow `pmset -a disablesleep 1` is still running: whenever TERM lands, sleep ends up back on,
+        // or the marker stays so the next start (or boot) turns it back on.
+        var raced: [String] = []
+        for delay in [0.0, 0.2, 0.5, 0.8, 1.1] {
+            fresh()
+            put("pmset-slow", "")
+            writeLease("awake \(epoch(60))")
+            guard let env = environment(once: nil), let process = launch(env, uid: "\(getuid())") else {
+                raced.append("\(delay): didn't start")
+                continue
+            }
+            let deadline = Date().addingTimeInterval(8)
+            while !log().contains("-a disablesleep 1") && Date() < deadline { usleep(10_000) }
+            usleep(useconds_t(delay * 1_000_000))
+            process.terminate()
+            _ = wait(process, seconds: 15)
+            usleep(1_300_000)   // anything still in flight lands
+            if flag() != "0" && !isOwned() { raced.append("\(delay) s: flag=\(flag()), no marker") }
+        }
+        check(raced.isEmpty, rule("TERM during a slow turn-off never leaves sleep off without a marker") + (raced.isEmpty ? "" : " \(raced)"))
 
         // Test switches are all or nothing.
         fresh()

@@ -93,7 +93,8 @@ now() {
   /bin/date +%s
 }
 
-# bounded <seconds> <command...>: runs the command, killing it if it takes longer. Returns its status.
+# bounded <seconds> <command...>: runs the command, killing it if it takes longer. Returns its status. While it runs,
+# $b_pid names it, so a signal handler can let it finish first.
 bounded() {
   b_ticks=$(( $1 * 10 ))
   shift
@@ -108,6 +109,9 @@ bounded() {
     b_ticks=$((b_ticks - 1))
   done
   wait "$b_pid"
+  b_status=$?
+  b_pid=""
+  return "$b_status"
 }
 
 # Prints 1 or 0, the real SleepDisabled setting, or nothing when pmset can't say.
@@ -164,14 +168,13 @@ disable_sleep() {
   bounded 10 "$PMSET" -a disablesleep 1 >/dev/null 2>&1
 }
 
-# Turns sleep back on if we turned it off. True once it is no longer ours.
+# Turns sleep back on if we turned it off. True once it is no longer ours. The marker goes only once pmset reads back
+# 0, so a change that lands late (or a pmset that lied) leaves it for the next check, start or boot to retry.
 restore_sleep() {
   [ -e "$OWNED" ] || return 0
-  if bounded 10 "$PMSET" -a disablesleep 0 >/dev/null 2>&1; then
-    /bin/rm -f "$OWNED"
-    return 0
-  fi
-  return 1
+  bounded 10 "$PMSET" -a disablesleep 0 >/dev/null 2>&1 || return 1
+  [ "$(sleep_disabled)" = 0 ] || return 1
+  /bin/rm -f "$OWNED"
 }
 
 step() {
@@ -245,6 +248,9 @@ step() {
 }
 
 on_signal() {
+  # A pmset still running (turning sleep off, say) finishes first, so it can't land after the restore.
+  [ -n "${b_pid:-}" ] && wait "$b_pid"
+  b_pid=""
   restore_sleep
   o=0
   [ -e "$OWNED" ] && o=1
