@@ -210,8 +210,14 @@ load_context() {
 
 print_context() {
   printf '%s\n' "$CTX_BODY"
-  # Always the quoted absolute path: it works in every host, and bin/ isn't on PATH in all of them.
-  printf '%s\n' "Command that adds an item to the user's Do Next (they agree first): \"$(self_path)\" add \"<short title>\""
+  # Codex (the only host that sets PLUGIN_DATA) doesn't put bin/ on PATH, so it gets the quoted absolute path;
+  # Claude Code does, so it gets the bare command. CLAUDECODE can't decide this: Codex started from Claude Code inherits it.
+  if [ -n "${PLUGIN_DATA:-}" ]; then
+    cmd="\"$(self_path)\""
+  else
+    cmd="monotask"
+  fi
+  printf '%s\n' "Command that adds an item to the user's Do Next (they agree first): $cmd add \"<short title>\""
 }
 
 EMPTY_NOTICE="Monotask update: the user's Do Now is empty now, so the earlier task is no longer in progress."

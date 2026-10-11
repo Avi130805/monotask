@@ -48,10 +48,10 @@ How the user works with it:
 - Done means the line above is met end to end. The user likes a plain answer on whether it is met yet, and what is left.
 - Only the user marks a task done, in Monotask.
 - Side work noticed along the way stays out of the current change. With the user's yes, it can go on their Do Next list.
-Command that adds an item to the user's Do Next (they agree first): "/path/to/plugins/monotask/bin/monotask" add "<short title>"
+Command that adds an item to the user's Do Next (they agree first): monotask add "<short title>"
 ```
 
-The agent uses that exact command, with the full path of the plugin's script, so it works in every host (Claude Code and Codex both) whether or not `bin/` is on the PATH.
+The agent uses that exact command. In Claude Code it is plain `monotask` (the plugin puts `bin/` on the PATH). Codex does not, so there the line carries the quoted full path of the plugin's script instead, e.g. `"/path/to/plugins/monotask/bin/monotask" add "<short title>"`.
 
 When your Do Now is cleared, the agent's next prompt carries one line saying so. The text lives in `agent-context.md` in Monotask's data folder, written by the app. The plugin only reads it.
 

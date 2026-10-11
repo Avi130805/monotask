@@ -88,16 +88,16 @@ reset
 CLAUDECODE=1; export CLAUDECODE
 ABS="$(cd "$(dirname "$BIN")" && pwd -P)/monotask"
 hook session-start "$(start_json s1 startup)"
-WANT="${FIXTURE_TEXT}Command that adds an item to the user's Do Next (they agree first): \"$ABS\" add \"<short title>\"
+WANT="${FIXTURE_TEXT}Command that adds an item to the user's Do Next (they agree first): monotask add \"<short title>\"
 "
-if [ "$OUT" = "$WANT" ] && [ $RC -eq 0 ]; then pass "session-start (Claude): fixture + quoted absolute path"; else fail "session-start (Claude): fixture + quoted absolute path" "$OUT"; fi
+if [ "$OUT" = "$WANT" ] && [ $RC -eq 0 ]; then pass "session-start (Claude): fixture + bare monotask command"; else fail "session-start (Claude): fixture + bare monotask command" "$OUT"; fi
 
 reset
 CLAUDECODE=1; PLUGIN_DATA="$T/plug"; export CLAUDECODE PLUGIN_DATA
 hook session-start "$(start_json s1 startup)"
 WANT="${FIXTURE_TEXT}Command that adds an item to the user's Do Next (they agree first): \"$ABS\" add \"<short title>\"
 "
-if [ "$OUT" = "$WANT" ] && [ $RC -eq 0 ]; then pass "session-start (Codex, even with CLAUDECODE inherited): same command line"; else fail "session-start (Codex, even with CLAUDECODE inherited): same command line" "$OUT"; fi
+if [ "$OUT" = "$WANT" ] && [ $RC -eq 0 ]; then pass "session-start (Codex, even with CLAUDECODE inherited): quoted absolute path"; else fail "session-start (Codex, even with CLAUDECODE inherited): quoted absolute path" "$OUT"; fi
 
 reset
 rm -f "$T/home/agent-context.md"

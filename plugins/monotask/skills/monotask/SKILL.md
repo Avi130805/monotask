@@ -9,7 +9,7 @@ Monotask is the user's one-task-at-a-time macOS app. It keeps one task, the Do N
 
 ## Reading the task
 
-The current Do Now and its finish line reach you automatically at session start, and again whenever it changes. To re-read it at any point, run `now` with the exact command from the session context (the last line there gives its full path):
+The current Do Now and its finish line reach you automatically at session start, and again whenever it changes. To re-read it at any point, run `now` with the exact command from the session context (the last line there gives it):
 
 ```
 <command from the session context> now
@@ -29,7 +29,7 @@ When you notice work that does not belong in the current change, keep it out of 
 - A short imperative title, under about 60 characters.
 - Do not add anything the user has not agreed to.
 
-The item shows up in the user's Do Next. The session's Monotask context names the full command path in its last line, because `monotask` is not on the PATH in every host. Use that exact command, not a bare `monotask`. If `add` says it couldn't reach Monotask, tell the user and let them add the item themselves with ⌥Space.
+The item shows up in the user's Do Next. The session's Monotask context gives the exact command in its last line: plain `monotask` in Claude Code, the full path of the script in Codex, which does not put it on the PATH. Use that exact command. If `add` says it couldn't reach Monotask, tell the user and let them add the item themselves with ⌥Space.
 
 ## What stays with the user
 
