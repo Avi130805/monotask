@@ -1,0 +1,6 @@
+node_modules/
+work/node_modules/
+work/frames/
+work/tmp/
+*.log
+out/check/*.tmp
