@@ -949,8 +949,11 @@ extension SelfTest {
     fileprivate static func checkFailover(_ check: (Bool, String) -> Void) {
         check(ProbeRound.judge([.ok, .ok, .failed]) == .online && ProbeRound.judge([.failed, .failed, .ok]) == .down
               && ProbeRound.judge([.captive, .captive, .captive]) == .captive && ProbeRound.judge([.ok, .captive, .failed]) == .captive
-              && ProbeRound.judge([.ok, .unusable, .unusable]) == .unclear && ProbeRound.judge([.unusable, .unusable, .unusable]) == .unclear,
+              && ProbeRound.judge([.ok, .unusable, .unusable]) == .unclear && ProbeRound.judge([.unusable, .unusable, .unusable]) == .unclear
+              && ProbeRound.judge([.failed, .unusable, .ok]) == .unclear,
               "two of three probes decide a round; unusable probes never count")
+        check(ProbeRound.judge([.captive, .failed, .failed]) == .captive && ProbeRound.judge([.ok, .ok, .captive]) == .online,
+              "behind a portal the HTTP probe gets the login page while the HTTPS ones fail: captive, not down")
         let apple = ConnectivityProbe.all[0]
         let google = ConnectivityProbe.all[2]
         let success = Data("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>".utf8)
@@ -962,10 +965,16 @@ extension SelfTest {
               "a login page or a redirect is a captive portal, not an outage")
         check(apple.classify(status: nil, body: nil, error: .timedOut) == .failed
               && apple.classify(status: nil, body: nil, error: .notConnectedToInternet) == .failed
-              && apple.classify(status: nil, body: nil, error: .cannotFindHost) == .failed, "timeouts and no route are failures")
+              && apple.classify(status: nil, body: nil, error: .cannotFindHost) == .failed
+              && google.classify(status: nil, body: nil, error: .secureConnectionFailed) == .failed
+              && google.classify(status: nil, body: nil, error: .serverCertificateUntrusted) == .failed,
+              "timeouts, no route and a TLS failure (a portal in the way) are failures")
         check(apple.classify(status: nil, body: nil, error: .appTransportSecurityRequiresSecureConnection) == .unusable,
               "a probe the app's own policy blocks never counts as the internet being down")
-        check(ConnectivityProbe.all.allSatisfy { $0.url.scheme == "http" }, "probes use plain HTTP, so a portal can show itself")
+        check(ConnectivityProbe.all.map(\.url.absoluteString) == ["http://captive.apple.com/hotspot-detect.html",
+                                                                  "https://www.apple.com/library/test/success.html",
+                                                                  "https://connectivitycheck.gstatic.com/generate_204"],
+              "Apple's captive page over plain HTTP (the one host App Transport Security allows), the others over HTTPS")
 
         // Healthy.
         var rig = FailoverRig()

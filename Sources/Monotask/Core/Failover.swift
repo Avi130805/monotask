@@ -24,20 +24,23 @@ enum ProbeRound: Equatable {
     /// Too few usable answers to say.
     case unclear
 
-    /// Two of three agreeing decides it: two answered properly is online, two silent is down.
+    /// Two answered properly is online. Otherwise a login page anywhere is a captive portal (behind one, the HTTPS
+    /// probes fail while the plain-HTTP one gets the page), and two silent is down.
     static func judge(_ outcomes: [ProbeOutcome]) -> ProbeRound {
         let ok = outcomes.filter { $0 == .ok }.count
         let failed = outcomes.filter { $0 == .failed }.count
         let captive = outcomes.filter { $0 == .captive }.count
         if ok >= 2 { return .online }
+        if captive >= 1 { return .captive }
         if failed >= 2 { return .down }
-        if captive >= 1 && captive + failed >= 2 { return .captive }
         return .unclear
     }
 }
 
-/// The plain-HTTP pages Apple and Google serve for exactly this check. Plain HTTP on purpose: a captive portal can
-/// only show itself by answering a request it can read.
+/// The pages Apple and Google serve for exactly this check. Apple's captive page is plain HTTP on purpose: a captive
+/// portal can only show itself by answering a request it can read. The other two are HTTPS because App Transport
+/// Security blocks plain HTTP from a bundled app everywhere except captive.apple.com (checked with a test bundle:
+/// http://connectivitycheck.gstatic.com fails with -1022), and Monotask's Info.plist carries no exceptions.
 struct ConnectivityProbe: Equatable {
     enum Expect: Equatable {
         case body(String)
@@ -49,8 +52,8 @@ struct ConnectivityProbe: Equatable {
 
     static let all = [
         ConnectivityProbe(url: URL(string: "http://captive.apple.com/hotspot-detect.html")!, expect: .body("Success")),
-        ConnectivityProbe(url: URL(string: "http://www.apple.com/library/test/success.html")!, expect: .body("Success")),
-        ConnectivityProbe(url: URL(string: "http://connectivitycheck.gstatic.com/generate_204")!, expect: .status(204)),
+        ConnectivityProbe(url: URL(string: "https://www.apple.com/library/test/success.html")!, expect: .body("Success")),
+        ConnectivityProbe(url: URL(string: "https://connectivitycheck.gstatic.com/generate_204")!, expect: .status(204)),
     ]
 
     /// Judges one response. `status` is nil when there was no HTTP answer at all.
