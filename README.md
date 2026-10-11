@@ -132,6 +132,8 @@ Everything is in `~/Library/Application Support/Monotask/`:
 
 Needs only Apple's Command Line Tools (Swift 6). No Xcode.
 
+Command Line Tools 27 ship a macOS 27 SDK where SwiftUI's `@State` needs a macro plugin that only Xcode includes. `scripts/build.sh` notices and builds against an older installed SDK. For a plain `swift build`, point it at one yourself: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk swift build`.
+
 ```bash
 ./scripts/build.sh            # builds build/Monotask.app
 ./scripts/build.sh --install  # also copies it to /Applications
