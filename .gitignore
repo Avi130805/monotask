@@ -6,3 +6,4 @@ build/
 .swiftpm/
 *.xcuserstate
 .claude/worktrees/
+dist/

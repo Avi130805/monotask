@@ -1,29 +1,79 @@
-# Next
+# Monotask
 
-A notch app for finishing one thing at a time. **Do Now** holds exactly one task, and it only counts as done when you hold the button to say it's done end to end. Everything else waits in **Do Next**.
+**One task at a time, in your MacBook's notch. Your coding agents know it too.**
 
-![Closed: a live dot and timer either side of the camera](docs/closed.png)
+<p align="center"><img src="docs/readme.gif" width="760" alt="Monotask: capture a task, start it with a finish line, Claude Code works toward it and parks a side quest after a yes, then hold to mark it done"></p>
 
-![Resting the pointer on the notch shows the task below the camera](docs/hover.png)
+AI agents made starting things free. Finishing is still on you.
 
-![Open](docs/open.png)
+Monotask holds exactly one task, your **Do Now**, with a **finish line**: one sentence that says what done means. Everything else waits in **Do Next**. A task only counts as done when you hold the button, and you only hold it when the task is done end to end.
 
-## Using it
+Then it tells your coding agent. Every Claude Code and Codex session knows your one task and its finish line, keeps its changes to that, tells you plainly whether the finish line is met, and parks side quests in Do Next only after you say yes.
 
-- **While something is in Do Now**, an amber dot and a timer sit either side of the camera. Rest the pointer on the notch to see the task and its finish line below it. Everything stays centred on the camera.
-- **Click the notch** to open it. Passing over it makes it swell slightly; turn on "Open on hover" in the ••• menu if you'd rather not click.
-- **⌥Space** from anywhere opens a capture field under the notch. Type, press Return, and you're back in your app. Esc cancels.
-- **Start** a task by writing what done looks like. That line is shown back to you while you hold to finish.
-- **Hold to mark done** for about a second to finish. Letting go early cancels.
-- **Can't finish?** lets you split it (the first piece becomes Do Now, the whole task goes back to the top of Do Next), park it as blocked, or drop it. Each needs a reason, and none of them count as done.
-- **Do Next** shows the top 3; the rest fold into Later. Hover a row for move-up and start, right-click to reorder, rename or delete, or double-click to rename.
-- **"N done this week"** in the top left opens the log of everything finished or dropped.
+> Notch apps for agents show you what your agent is doing. Monotask tells your agent what you're doing.
 
-## Insights
+Free and open source (MIT). No accounts, no cloud, no telemetry.
 
-Open it from the ••• menu (**Insights…**) or the **Insights** button on the log page. While it's open, Next shows in the Dock and ⌘-Tab; closing it puts Next back in the notch only.
+## How it works
 
-![Insights](docs/insights.png)
+| | |
+| --- | --- |
+| **Capture** | ⌥Space from any app. Type it, press Return, and you're back where you were. It waits in Do Next. |
+| **Start one task** | Write what done looks like. That's the finish line, and it's shown back to you while you finish. |
+| **It stays in your notch** | A live dot and a timer sit either side of the camera. Rest the pointer on the notch to see the task. |
+| **Only you finish it** | Hold to mark done for about a second. Letting go early cancels. |
+| **Can't finish?** | Split it (the first piece becomes Do Now), park it as blocked, or drop it. Each needs a reason, and none of them count as done. |
+
+Do Next shows the top three; the rest fold into Later. Hover a row to move it up or start it, right-click to reorder, rename or delete. "N done this week" opens the log of everything finished or dropped.
+
+## With Claude Code and Codex
+
+Install the plugin once and every session knows your Do Now and its finish line. Nothing to paste, no command to remember.
+
+**Claude Code**
+
+```
+claude plugin marketplace add Avi130805/monotask
+claude plugin install monotask@monotask
+```
+
+**Codex**
+
+```
+codex plugin marketplace add Avi130805/monotask
+codex plugin add monotask@monotask
+```
+
+Then start `codex` in a terminal, run `/hooks`, and approve the four Monotask hooks once.
+
+What changes:
+
+- **Your task travels with you.** Open a session in any folder and the agent already knows the one thing you're working on and what done means.
+- **It stays in scope.** Ask for something unrelated and it says once that it isn't your Do Now, then helps anyway. It never blocks you.
+- **It tells you what's left.** Done means your finish line is met end to end, and the agent says plainly whether it is.
+- **Side quests wait.** A flaky test it trips over goes to your Do Next, and only after you say yes.
+- **Only you finish.** Agents can't start, change or finish your Do Now. Information flows one way, into the agent; the notch only ever shows "Added to Do Next".
+
+The plugin sends your task title and finish line to your agent, and through it to the agent's model provider. Nothing else leaves your Mac, and the plugin makes no network calls of its own. Details, including exactly what the agent sees: [plugins/monotask](plugins/monotask/README.md).
+
+## What Monotask doesn't do
+
+No projects, priorities, due dates, estimates, tags, sprints, accounts or sync. If a feature would ask you to plan, sort or review your list, it isn't here. That's the point.
+
+## Install
+
+1. Download `Monotask.zip` from [the latest release](https://github.com/Avi130805/monotask/releases/latest), unzip it, and drag **Monotask** into Applications.
+2. Open it. The first time, macOS says it can't check the app for malicious software, because it isn't notarized. Open **System Settings → Privacy & Security**, scroll down, click **Open Anyway** next to Monotask, and confirm.
+3. Or build it yourself from source (below); it takes a minute with only the Command Line Tools.
+
+Needs macOS 15 or later on Apple silicon. It's made for MacBooks with a notch; on a display without one it hangs a small notch-shaped pill from the top of the screen.
+
+Used **Next**, the earlier name? On first launch Monotask copies your list, history, prompter script and settings over. Next's own files are left as they were.
+
+<details>
+<summary><b>Insights</b></summary>
+
+Open it from the ••• menu (**Insights…**) or the **Insights** button on the log page. While it's open, Monotask shows in the Dock and ⌘-Tab; closing it puts Monotask back in the notch only.
 
 For the last 7 days, 30 days or all time:
 
@@ -34,23 +84,23 @@ For the last 7 days, 30 days or all time:
 - **In and out**: what you captured against what you finished each week, and whether your list is growing or shrinking.
 - **What blocked you** and **why things were dropped**, in your own words.
 - **History** of every task that ended, with how long it took.
+</details>
 
-## Prompter
+<details>
+<summary><b>Prompter</b>: a teleprompter under the camera</summary>
 
 For recording a short talking-to-camera video, or rehearsing one. The script sits right under the camera, so your eyes stay close to the lens.
-
-![Cue mode](docs/prompter-cue.png)
 
 - **⌥P** from any app (or **Start Prompter** in the ••• menu) puts it under the notch with a 3-2-1 countdown. **⌥P** again or **Esc** leaves. If ⌥P is taken, it falls back to ⌃⌥P; the ••• menu shows which.
 - **Cue mode** (the default) shows one section at a time: its label beside the camera and a few keywords to talk around. It moves on when the section's time is up, or when you press →. The last cue stays up until you press → or leave.
 - **Word mode** shows the script one word at a time, with the next word faint beside it, for rehearsing. **M** switches between the two and keeps your place.
 - **Space** pauses and resumes, **← →** go back or forward a word (a section in Cue mode), **↑ ↓** change the speed by 10 words a minute (150 to start), **R** starts again from the top.
 - The time you've spent speaking is shown against the script's budget and turns amber once you're over. A thin line under the text shows how far through the script you are, section by section.
-- Next remembers the mode, the speed and where you were, and picks up there next time (the countdown says where from). Editing the script starts it from the top.
+- Monotask remembers the mode, the speed and where you were, and picks up there next time (the countdown says where from). Editing the script starts it from the top.
 - It takes the keyboard while it's up. If you click another app (to start recording, say), click the prompter once to give it the keys back.
 - Prompting is never a task: it doesn't touch Do Now or Do Next, writes no events and doesn't show in Insights.
 
-The script is a plain text file, `~/Library/Application Support/Next/prompter.txt`. It's created with a sample script the first time you open the prompter. Edit it from **Prompter…** in the ••• menu (paste, edit, Save, or Save and start), which also tells you how long it runs at your speed and how much to cut if it's over its budget. You can also edit the file in any text editor.
+The script is a plain text file, `~/Library/Application Support/Monotask/prompter.txt`. It's created with a sample script the first time you open the prompter. Edit it from **Prompter…** in the ••• menu (paste, edit, Save, or Save and start), which also tells you how long it runs at your speed and how much to cut if it's over its budget. You can also edit the file in any text editor.
 
 | Markup | Means |
 | --- | --- |
@@ -65,35 +115,43 @@ The script is a plain text file, `~/Library/Application Support/Next/prompter.tx
 | `{look}` | A full-width "look at the lens" flash for about 0.6 s. |
 
 Punctuation adds natural pauses on its own: about 0.2 s after a comma, 0.45 s after a full stop and 0.3 s at an em dash. A pause mark straight after punctuation replaces its pause rather than adding to it. Each word gets time for its length: a five-letter word gets one word's worth at the current speed, and shorter or longer words a little less or more.
+</details>
 
 ## Where your data lives
 
-Everything is in `~/Library/Application Support/Next/`:
+Everything is in `~/Library/Application Support/Monotask/`:
 
 - `state.json` holds Do Now, Do Next and the log. It's rewritten whenever something changes.
-- `events.jsonl` is the event history the Insights are built from. It has one line per capture, start, split, block, drop, delete or finish, and lines are only ever added. If you upgrade from a version without it, it's rebuilt once from your existing log.
+- `events.jsonl` is the history Insights are built from: one line per capture, start, split, block, drop, delete or finish. Lines are only ever added.
 - `backups/` keeps the first copy of both files from each of the last 14 days.
-- `prompter.txt` is the prompter's script. Next only writes it when you save from **Prompter…**, or to put the sample there if it's missing.
+- `agent-context.md` is what coding agents read: your Do Now and its finish line. It exists only while something is in Do Now.
+- `inbox/` is where agents drop items for Do Next. Sandboxed agents use `$TMPDIR/monotask-inbox/` instead. Monotask imports both and empties them.
+- `prompter.txt` is the prompter's script.
 
 ## Building
 
 Needs only Apple's Command Line Tools (Swift 6). No Xcode.
 
 ```bash
-./scripts/build.sh            # builds build/Next.app
-./scripts/build.sh --run      # builds and launches it
-./scripts/build.sh --install  # copies it to /Applications
+./scripts/build.sh            # builds build/Monotask.app
+./scripts/build.sh --install  # also copies it to /Applications
+./scripts/release.sh          # builds and zips a release into dist/
 ```
 
 Checks and previews:
 
 ```bash
-.build/debug/Next --selftest          # the task rules, the event history, the Insights maths and the prompter's markup and timing
-.build/debug/Next --snapshot shots/   # renders every notch state, the prompter, the Insights window and the script editor with demo data
+.build/debug/Monotask --selftest          # the task rules, history, Insights maths, prompter, agent bridge and migration
+.build/debug/Monotask --snapshot shots/   # renders every notch state with demo data
+sh plugins/monotask/test/run.sh           # the agent plugin
 ```
 
-Both use throwaway files, so they never touch your real list.
+All of them use throwaway files, so they never touch your real list.
 
 ## Credits
 
-Notch shape from [DynamicNotchKit](https://github.com/MrKai77/DynamicNotchKit) (MIT, Kai Azim). Spring tuning, window setup and hover handling follow [boring.notch](https://github.com/TheBoredTeam/boring.notch) and [NotchDrop](https://github.com/Lakr233/NotchDrop).
+The notch outline comes from [DynamicNotchKit](https://github.com/MrKai77/DynamicNotchKit) by Kai Azim (MIT); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). [boring.notch](https://github.com/TheBoredTeam/boring.notch) and [NotchDrop](https://github.com/Lakr233/NotchDrop) showed what a notch app can feel like.
+
+## License
+
+[MIT](LICENSE)
