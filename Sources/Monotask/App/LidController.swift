@@ -124,7 +124,7 @@ final class LidController {
                 MainActor.assumeIsolated { self?.evaluate() }
             })
         }
-        // A setting changed in the window applies at once. Other parts of the app write defaults too (the prompter, often),
+        // A setting changed in the window applies at once. Other parts of the app write defaults too (the panel's toggles, say),
         // so changes are gathered for a moment first.
         observers.append(center.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {

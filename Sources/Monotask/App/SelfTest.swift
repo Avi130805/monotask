@@ -1,6 +1,6 @@
 import AppKit
 
-/// Exercises the Do Now / Do Next rules, the event history, the insight maths, the prompter's markup and timing
+/// Exercises the Do Now / Do Next rules, the event history, the insight maths
 /// and the coding-agent bridge against throwaway files. Run with `Monotask --selftest`.
 @MainActor
 enum SelfTest {
@@ -95,16 +95,6 @@ enum SelfTest {
 
         print("Insights")
         checkInsights(check)
-
-        print("Prompter")
-        let listBefore = try? Data(contentsOf: stateURL)
-        let historyBefore = try? Data(contentsOf: eventsURL)
-        checkPromptMarkup(check)
-        checkPromptTiming(check)
-        checkPrompter(check, file: folder.appendingPathComponent("prompter.txt"))
-        check(listBefore != nil && historyBefore != nil
-              && (try? Data(contentsOf: stateURL)) == listBefore && (try? Data(contentsOf: eventsURL)) == historyBefore,
-              "prompting never touches the list or the event history, so it can't count as a task or reach Insights")
 
         print("Coding agents")
         checkAgents(check, scratch: folder.appendingPathComponent("agents", isDirectory: true))
@@ -355,7 +345,7 @@ enum SelfTest {
 
         try? files.removeItem(at: old.appendingPathComponent("state.json"))
         try? files.copyItem(at: list, to: old.appendingPathComponent("state.json"))
-        try? Data("script".utf8).write(to: old.appendingPathComponent("prompter.txt"))
+        try? Data("notes".utf8).write(to: old.appendingPathComponent("notes.txt"))
         oldDefaults.set(true, forKey: Prefs.openOnHover)
         oldDefaults.set(false, forKey: Prefs.haptics)
         defaults.set(true, forKey: Prefs.haptics)
@@ -373,7 +363,7 @@ enum SelfTest {
         try? files.removeItem(at: locked)
         check(LegacyData.migrate(from: old, to: new, defaults: defaults, oldDefaults: oldDefaults)
               && (try? Data(contentsOf: new.appendingPathComponent("state.json"))) == (try? Data(contentsOf: list))
-              && files.fileExists(atPath: new.appendingPathComponent("prompter.txt").path),
+              && files.fileExists(atPath: new.appendingPathComponent("notes.txt").path),
               "Next's list and files are copied into Monotask's folder")
         check(files.fileExists(atPath: old.appendingPathComponent("state.json").path), "Next's own files are kept")
         check(defaults.bool(forKey: Prefs.openOnHover) && defaults.bool(forKey: Prefs.haptics),
@@ -431,257 +421,6 @@ enum SelfTest {
     private static func near(_ a: Double?, _ b: Double, _ tolerance: Double = 0.0001) -> Bool {
         guard let a else { return false }
         return abs(a - b) <= tolerance
-    }
-
-    /// The markup: pauses, punctuation, emphasis, notes, speed spans, look flashes, sections and cues.
-    private static func checkPromptMarkup(_ check: (Bool, String) -> Void) {
-        let pauses = PromptScript(parsing: "one / two // three ... four")
-        check(pauses.steps.map(\.kind) == [.word, .pause, .word, .pause, .word, .beat, .word],
-              "/ // and ... become pauses between the words")
-        check(pauses.steps.filter { $0.kind != .word }.map(\.pause) == [0.35, 0.8, 0.5],
-              "a short pause is 0.35 s, a long one 0.8 s, a beat 0.5 s")
-        check(pauses.steps[5].text == "…" && PromptScript(parsing: "well … then").steps[1].kind == .beat,
-              "a beat is shown as …, and … works as well as ...")
-
-        let punctuation = PromptScript(parsing: "Hi, there. Wait — now: go! \"quoted.\" plain")
-        check(punctuation.steps.map(\.pause) == [0.2, 0.45, 0.3, 0.2, 0.45, 0.45, 0],
-              "punctuation pauses: comma 0.2 s, full stop 0.45 s, em dash 0.3 s, even inside quotes")
-        check(punctuation.steps[2].text == "Wait —" && punctuation.wordCount == 7,
-              "an em dash joins the word before it rather than counting as a word")
-        check(PromptScript(parsing: "genie—it's").steps.map(\.text) == ["genie —", "it's"],
-              "an em dash touching two words splits them")
-        let merged = PromptScript(parsing: "Warangal, // building")
-        check(merged.steps[0].pause == 0 && merged.steps[1].pause == Pace.longPause,
-              "a pause mark after punctuation replaces its pause instead of adding to it")
-        check(PromptScript(parsing: "checks. ...").steps.map(\.pause) == [0, 0.5]
-              && PromptScript(parsing: "done. /").steps.map(\.pause) == [0, 0.45],
-              "…and the longer of the two wins")
-
-        let emphasis = PromptScript(parsing: "in *plain English* and *weeks*, not days")
-        check(emphasis.steps.filter(\.emphasis).map(\.text) == ["plain", "English", "weeks,"],
-              "*…* marks emphasis across words, and the stars aren't shown")
-        check(emphasis.steps.first { $0.text == "weeks," }?.pause == Pace.comma,
-              "punctuation after an emphasis still pauses")
-        check(PromptScript(parsing: "*left open\nnext line").steps.last?.emphasis == false,
-              "an unclosed * ends with its line")
-
-        let noted = PromptScript(parsing: "Hello there.\n>> smile, slow down\nNext line >> breathe")
-        check(noted.steps.filter { $0.kind == .note }.map(\.text) == ["smile, slow down", "breathe"],
-              ">> makes a note, on its own line or at the end of one")
-        check(noted.wordCount == 4 && near(noted.duration(wpm: 150), PromptScript(parsing: "Hello there.\nNext line").duration(wpm: 150)),
-              "notes are never spoken: they aren't words and take no time")
-
-        let spans = PromptScript(parsing: "one [slow] two three [/slow] four [fast] five [/fast] six")
-        check(spans.steps.map(\.speed) == [1, 0.75, 0.75, 1, 1.25, 1], "[slow] and [fast] set the speed of their span")
-        let plain = PromptScript(parsing: "three").duration(wpm: 150)
-        check(near(spans.steps[2].duration(wpm: 150), plain / 0.75) && near(spans.steps[4].duration(wpm: 150),
-              PromptScript(parsing: "five").duration(wpm: 150) / 1.25), "a slow span takes 1/0.75 as long, a fast one 1/1.25")
-        check(PromptScript(parsing: "# A\n[slow] one\n# B\ntwo").steps.map(\.speed) == [0.75, 1],
-              "an unclosed span ends with its section")
-
-        let look = PromptScript(parsing: "the lens.{look} Then")
-        check(look.steps.map(\.kind) == [.word, .word, .look, .word] && look.steps[2].pause == Pace.look
-              && look.steps[2].duration(wpm: 300) == 0.6 && look.steps[1].text == "lens.",
-              "{look} is a 0.6 s flash at any speed, even touching a word")
-
-        let sections = PromptScript(parsing: """
-        intro words
-        # WHO (8s)
-        @cue: Avinash · physics, NIT Warangal · solo
-        Hi.
-        # WHAT (7.5 s)
-        @cue: plain English, fab-ready board, pet feeder
-        board
-        # NOW (0:12)
-        I started with *the harness* and *checks*.
-        # LAST
-        no budget here
-        """)
-        check(sections.sections.map(\.label) == ["", "WHO", "WHAT", "NOW", "LAST"]
-              && sections.sections.map(\.budget) == [nil, 8, 7.5, 12, nil],
-              "# starts a section; (8s), (7.5 s) and (0:12) are budgets; text before any # gets its own")
-        check(sections.sections[1].cues == ["Avinash", "physics, NIT Warangal", "solo"],
-              "@cue splits on · when there is one, so keywords can hold commas")
-        check(sections.sections[2].cues == ["plain English", "fab-ready board", "pet feeder"], "…and on commas otherwise")
-        check(sections.sections[3].cues == ["the harness", "checks"] && sections.sections[4].cues == ["no budget here"],
-              "without @cue, Cue mode shows the emphasised phrases, or how the section begins")
-        check(sections.steps[sections.sections[1].steps].map(\.text) == ["Hi."], "each section owns its own steps")
-        check(sections.totalBudget == Pace.defaultBudget
-              && PromptScript(parsing: "# A (10s)\nx\n# B (20s)\ny").totalBudget == 30,
-              "the total budget adds up the sections' when they all have one, and is a minute otherwise")
-    }
-
-    /// Words per minute, word length, the estimate, and the two timelines.
-    private static func checkPromptTiming(_ check: (Bool, String) -> Void) {
-        check(near(Pace.words(in: "board"), 1) && near(PromptScript(parsing: "board").duration(wpm: 150), 0.4)
-              && near(PromptScript(parsing: "board").duration(wpm: 300), 0.2),
-              "a five-letter word takes 60/WPM: 0.4 s at 150, 0.2 s at 300")
-        check(Pace.words(in: "a") < Pace.words(in: "the") && Pace.words(in: "the") < 1
-              && Pace.words(in: "improvising,") > 1.4 && Pace.words(in: "improvising,") <= 1.6,
-              "shorter words get less time and longer ones more, within limits")
-        check(near(Pace.words(in: "four-layer"), Pace.words(in: "four") + Pace.words(in: "layer")),
-              "each part of a hyphenated word counts")
-        let paused = PromptScript(parsing: "one / two")
-        check(near(paused.duration(wpm: 150) - paused.duration(wpm: 300),
-                   (Pace.words(in: "one") + Pace.words(in: "two")) * (0.4 - 0.2)),
-              "doubling the speed halves the words but not the pauses")
-
-        let readText = "# A\none / two three."
-        let read = PromptScript(parsing: readText)
-        let pace = PromptPace(fingerprint: PromptScript.fingerprint(readText), starts: [0, 1, 1.5], end: 2.5, wpm: 150)
-        let yours = PromptTimeline(read, pace: pace, wpm: 150)
-        let wordSteps = read.steps.indices.filter { read.steps[$0].kind == .word }
-        let pauseStep = read.steps.firstIndex { $0.kind == .pause }!
-        check(pace.fits(read, text: readText) && !pace.fits(read, text: readText + " "),
-              "a measured pace only applies to the exact script it was measured on")
-        check(wordSteps.map { yours.starts[$0] } == [0, 1, 1.5] && near(yours.total, 2.5)
-              && yours.durations[pauseStep] > 0 && near(yours.starts[pauseStep] + yours.durations[pauseStep], 1),
-              "your pace: every word starts when you said it, and the pause fills the gap you left")
-        check(read.steps[yours.step(at: 1.2)!].text == "two" && yours.step(at: 2.6) == nil,
-              "your pace finds the word you were saying at any moment")
-        let faster = PromptTimeline(read, pace: pace, wpm: 300)
-        check(wordSteps.map { faster.starts[$0] } == [0, 0.5, 0.75] && near(faster.total, 1.25),
-              "↑ on your pace plays the same reading faster")
-
-        let sample = PromptScript(parsing: PromptScript.sample)
-        check(sample.sections.map(\.label) == ["WHO", "WHAT", "WHY + HOW", "NOW"]
-              && sample.sections.map(\.budget) == [7, 15, 27, 11] && sample.totalBudget == 60,
-              "the sample has four sections with budgets adding up to 60 s")
-        check(sample.wordCount == 118 && sample.steps.filter { $0.kind == .note }.count == 2
-              && sample.steps.filter { $0.kind == .look }.count == 1
-              && sample.steps.filter(\.emphasis).map(\.text) == ["plain", "English —", "weeks", "the", "harness"],
-              "the sample reads as 118 words, two notes, one look and its emphasis")
-        check(sample.sections.map(\.cues.count) == [3, 4, 5, 4]
-              && sample.sections[1].cues == ["plain English in", "fab-ready kit out", "pet feeder", "schematic, layout, Gerbers"],
-              "the sample's cue lines are read as written")
-
-        let estimate = sample.duration(wpm: 150)
-        let bySection = sample.sections.indices.map { sample.duration(ofSection: $0, wpm: 150) }
-        check(near(estimate, bySection.reduce(0, +)), "the estimate is the sum of the sections")
-        let fit = sample.wpm(toFit: 60)
-        check(fit != nil && near(sample.duration(wpm: fit ?? 0), 60, 0.001), "the speed that fits a budget really fits it")
-        let words = PromptTimeline(sample, wpm: 150, fitToBudgets: false)
-        check(near(words.total, estimate), "Word mode's timeline is exactly the estimate")
-        let cues = PromptTimeline(sample, wpm: 150, fitToBudgets: true)
-        check(cues.sectionStarts == [0, 7, 22, 49] && cues.total == 60, "Cue mode gives every section its budget")
-        let describe = sample.steps.firstIndex { $0.text == "describe" }!
-        check(sample.steps[words.step(at: words.starts[describe] + 0.01)!].text == "describe"
-              && words.step(at: words.total) == nil, "a moment on the timeline finds its word, and none past the end")
-        let middle = words.starts[describe] + words.durations[describe] / 2
-        check(near(cues.position(middle, from: words), cues.starts[describe] + cues.durations[describe] / 2),
-              "a place maps onto the other mode's timeline, the same way through the same word")
-        let smile = sample.steps.firstIndex { $0.text == "smile" }!
-        check(words.notes(at: words.starts[describe]) == [smile] && words.notes(at: words.starts[describe] + 5).isEmpty,
-              "a note stays up for a few seconds after its place, then goes")
-
-        print(String(format: "  info  sample: %d words, %.1f s at 150 WPM against a %.0f s budget (%+.1f s); 60 s needs %.0f WPM",
-                     sample.wordCount, estimate, sample.totalBudget, estimate - sample.totalBudget, fit ?? 0))
-        print("  info  by section at 150 WPM: " + sample.sections.indices.map {
-            String(format: "%@ %.1f/%.0f s", sample.sections[$0].label, bySection[$0], sample.sections[$0].budget ?? 0)
-        }.joined(separator: ", "))
-    }
-
-    /// The player, on a clock the test turns by hand, with a throwaway script file and nothing remembered.
-    private static func checkPrompter(_ check: (Bool, String) -> Void, file: URL) {
-        check(!FileManager.default.fileExists(atPath: file.path), "there's no script before the prompter first opens")
-        let prompter = Prompter(fileURL: file, defaults: nil)
-        var clock: TimeInterval = 1_000
-        prompter.now = { clock }
-        prompter.enter()
-        check((try? String(contentsOf: file, encoding: .utf8)) == PromptScript.sample,
-              "opening it writes the sample as prompter.txt when there's no script")
-        check(prompter.phase == .countdown(3) && prompter.mode == .word && prompter.wpm == 150 && prompter.position == 0,
-              "it starts in Word mode at 150 WPM, from the top, with a 3-2-1 countdown")
-        prompter.switchMode()
-        check(prompter.mode == .cue && prompter.position == 0, "M switches to Cue mode before the start, still from the top")
-
-        prompter.togglePause()
-        check(prompter.phase == .paused, "space during the countdown pauses instead")
-        prompter.togglePause()
-        clock += 5
-        prompter.refresh()
-        check(prompter.phase == .playing && prompter.section == 0 && near(prompter.elapsed, 5), "the stopwatch runs while playing")
-        clock += 3.5
-        prompter.refresh()
-        check(prompter.section == 1 && prompter.note == "smile",
-              "Cue mode moves on when a section's budget is up, with the note that comes after it")
-        prompter.forward()
-        check(prompter.section == 2 && near(prompter.position, 22), "→ skips to the next section")
-        prompter.back()
-        check(prompter.section == 1 && near(prompter.position, 7), "← goes back a section")
-        prompter.togglePause()
-        clock += 30
-        prompter.refresh()
-        check(prompter.phase == .paused && near(prompter.elapsed, 8.5), "the clock stops while paused")
-
-        prompter.switchMode()
-        check(prompter.mode == .word && prompter.wordFrame.word?.text == "You" && prompter.wordFrame.next?.text == "describe",
-              "switching to Word mode keeps the place, with the next word beside it")
-        prompter.forward()
-        check(prompter.wordFrame.word?.text == "describe", "→ moves on a word in Word mode")
-        prompter.back()
-        check(prompter.wordFrame.word?.text == "You", "← goes back a word")
-        let line = prompter.lineFrame.tokens
-        check(line.first?.text == "You" && line.first?.state == .now && line.contains { $0.isPause }
-              && line.dropFirst().allSatisfy { $0.state == .ahead },
-              "Word mode shows the whole phrase: the word you're on lit, the rest waiting, pauses marked")
-        let phrases = Prompter.phrases(in: prompter.script)
-        check(phrases.allSatisfy { range in
-                  prompter.script.steps[range].filter { $0.kind == .word }.count <= 10
-              } && phrases.map(\.count).reduce(0, +) <= prompter.script.steps.count,
-              "phrases stay short enough to read at a glance and never overlap")
-        prompter.changeSpeed(by: Pace.wpmStep)
-        check(prompter.wpm == 160 && prompter.wordFrame.word?.text == "You", "↑ is 10 WPM faster and keeps the place")
-        for _ in 0..<30 { prompter.changeSpeed(by: Pace.wpmStep) }
-        let fastest = prompter.wpm
-        for _ in 0..<40 { prompter.changeSpeed(by: -Pace.wpmStep) }
-        check(fastest == 300 && prompter.wpm == 60, "the speed stays between 60 and 300 WPM")
-        while prompter.wpm < 150 { prompter.changeSpeed(by: Pace.wpmStep) }
-
-        prompter.togglePause()
-        clock += 10
-        prompter.refresh()
-        let english = prompter.timeline.starts[prompter.script.steps.firstIndex { $0.text == "English —" }!]
-        check(prompter.wordFrame.word?.text == prompter.script.steps[prompter.timeline.step(at: prompter.position)!].text
-              || prompter.wordFrame.resting, "playing shows the word at the clock's place")
-        check(prompter.position > english, "ten seconds in Word mode get past “plain English”")
-        clock += 1_000
-        prompter.refresh()
-        check(prompter.phase == .finished && prompter.position == prompter.timeline.total, "Word mode ends with its last word")
-        prompter.restart()
-        check(prompter.phase == .countdown(3) && prompter.position == 0 && prompter.elapsed == 0,
-              "R starts again from the top with a fresh countdown")
-
-        prompter.switchMode()
-        prompter.togglePause()
-        prompter.togglePause()
-        clock += 1_000
-        prompter.refresh()
-        check(prompter.phase == .playing && prompter.section == 3 && near(prompter.elapsed, 1_000),
-              "in Cue mode the last cue stays up, and the clock keeps running, until you move on")
-        prompter.forward()
-        check(prompter.phase == .finished, "→ on the last cue ends it")
-        prompter.leave()
-        check(prompter.phase == .paused, "leaving stops the clock")
-
-        try? "# MINE (5s)\nhello".write(to: file, atomically: true, encoding: .utf8)
-        prompter.load()
-        check(prompter.text == "# MINE (5s)\nhello" && prompter.script.sections.first?.label == "MINE",
-              "an existing script is read and never replaced by the sample")
-
-        let sample = PromptScript(parsing: PromptScript.sample)
-        let cues = PromptTimeline(sample, wpm: 150, fitToBudgets: true)
-        let words = PromptTimeline(sample, wpm: 150, fitToBudgets: false)
-        let describe = sample.steps.firstIndex { $0.text == "describe" }!
-        let print = PromptScript.fingerprint(PromptScript.sample)
-        check(Prompter.resumePosition(step: describe, saved: print, current: PromptScript.sample, script: sample,
-                                      timeline: cues, mode: .cue) == 7
-              && Prompter.resumePosition(step: describe, saved: print, current: PromptScript.sample, script: sample,
-                                         timeline: words, mode: .word) == words.starts[describe],
-              "it picks up where you left off: the section in Cue mode, the word in Word mode")
-        check(Prompter.resumePosition(step: describe, saved: "edited", current: PromptScript.sample, script: sample,
-                                      timeline: cues, mode: .cue) == 0,
-              "a remembered place is dropped once the script changes")
     }
 }
 

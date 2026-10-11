@@ -1,7 +1,7 @@
 import Foundation
 
-/// Monotask used to be called Next. The first time it runs, it copies Next's list, history, backups and prompter
-/// script into its own folder, and Next's settings into its own, so nothing is lost. Next's files are left as they
+/// Monotask used to be called Next. The first time it runs, it copies Next's list, history and backups
+/// into its own folder, and Next's settings into its own, so nothing is lost. Next's files are left as they
 /// were, so the old app keeps working until you remove it.
 enum LegacyData {
     static let oldBundleID = "com.yoooo.Next"

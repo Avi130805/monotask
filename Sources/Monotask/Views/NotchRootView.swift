@@ -4,14 +4,12 @@ import SwiftUI
 struct NotchRootView: View {
     let store: Store
     let model: NotchModel
-    let prompter: Prompter
     @Namespace var namespace
 
     var body: some View {
         NotchBody(namespace: namespace)
             .environment(store)
             .environment(model)
-            .environment(prompter)
             .environment(\.colorScheme, .dark)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -30,7 +28,7 @@ struct NotchBody: View {
 
     private var bottomRadius: CGFloat {
         switch model.mode {
-        case .open, .prompter: Layout.openBottom
+        case .open: Layout.openBottom
         case .capture: Layout.captureBottom
         case .peek, .closed: model.hasChin ? Layout.chinBottom : Layout.closedBottom + (model.mode == .peek ? 3 : 0)
         }
@@ -49,9 +47,6 @@ struct NotchBody: View {
                 }
                 if model.mode == .capture {
                     CaptureBar().transition(.notchReveal)
-                }
-                if model.mode == .prompter {
-                    PrompterView().transition(.notchReveal)
                 }
             }
             // Collapsing this frame at once lets the shape start shrinking while the content fades out.

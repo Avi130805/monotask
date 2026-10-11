@@ -10,10 +10,8 @@ enum NotchMode: Equatable {
     case open
     /// The quick capture field from the global shortcut.
     case capture
-    /// The prompter under the camera, for talking to it.
-    case prompter
 
-    var isExpanded: Bool { self == .open || self == .capture || self == .prompter }
+    var isExpanded: Bool { self == .open || self == .capture }
 }
 
 enum PanelPage { case main, log }
@@ -68,7 +66,6 @@ final class NotchModel {
     var flash: Flash?
     var shakes = 0
     var hotKeyLabel = ""
-    var prompterHotKeyLabel = ""
     var focusCaptureToken = 0
 
     /// Snapshot-only: pose the hold button mid-hold or completed, instead of its own press state.
@@ -93,8 +90,6 @@ final class NotchModel {
     @ObservationIgnored var onReleaseKeyboard: () -> Void = {}
     @ObservationIgnored var onCaptured: (_ position: Int) -> Void = { _ in }
     @ObservationIgnored var onOpenInsights: () -> Void = {}
-    @ObservationIgnored var onStartPrompter: () -> Void = {}
-    @ObservationIgnored var onOpenScript: () -> Void = {}
 
     /// Starting needs an empty Do Now; otherwise the card shakes its head.
     func tryStart(_ item: TaskItem, in store: Store) {

@@ -7,7 +7,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentBridge: AgentBridge?
     private var agentInbox: AgentInbox?
     private var hotKey: HotKey?
-    private var prompterHotKey: HotKey?
     private var lid: LidController?
     private var lidWindow: LidWindow?
 
@@ -22,9 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let file = ProcessInfo.processInfo.environment["MONOTASK_STATE_FILE"].map { URL(fileURLWithPath: $0) }
         if file == nil { LegacyData.migrate() }
         let store = Store(fileURL: file ?? Store.defaultFileURL)
-        // The prompter script sits beside the list, so a test run's script is throwaway too.
-        let script = file.map { $0.deletingLastPathComponent().appendingPathComponent("prompter.txt") }
-        let notch = NotchController(store: store, prompter: Prompter(fileURL: script ?? Prompter.defaultFileURL))
+        let notch = NotchController(store: store)
         self.store = store
         self.notch = notch
         notch.start()
@@ -45,11 +42,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             notch?.toggleCapture()
         }
         notch.model.hotKeyLabel = hotKey?.label ?? ""
-
-        prompterHotKey = HotKey.registerFirstAvailable(HotKey.prompterDefaults) { [weak notch] in
-            notch?.togglePrompter()
-        }
-        notch.model.prompterHotKeyLabel = prompterHotKey?.label ?? ""
 
         // Lid-closed mode: off unless switched on in its window, opened from the ••• menu. The lease sits beside the list,
         // so a test run's lease is throwaway, and a test run never shows its alerts or installs anything.

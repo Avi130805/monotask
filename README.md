@@ -105,7 +105,7 @@ No projects, priorities, due dates, estimates, tags, sprints, accounts or sync. 
 
 Needs macOS 15 or later on Apple silicon. It's made for MacBooks with a notch; on a display without one it hangs a small notch-shaped pill from the top of the screen.
 
-Used **Next**, the earlier name? On first launch Monotask copies your list, history, prompter script and settings over. Next's own files are left as they were.
+Used **Next**, the earlier name? On first launch Monotask copies your list, history and settings over. Next's own files are left as they were.
 
 <details>
 <summary><b>Insights</b></summary>
@@ -123,37 +123,6 @@ For the last 7 days, 30 days or all time:
 - **History** of every task that ended, with how long it took.
 </details>
 
-<details>
-<summary><b>Prompter</b>: a teleprompter under the camera</summary>
-
-For recording a short talking-to-camera video, or rehearsing one. The script sits right under the camera, so your eyes stay close to the lens.
-
-- **⌥P** from any app (or **Start Prompter** in the ••• menu) puts it under the notch with a 3-2-1 countdown. **⌥P** again or **Esc** leaves. If ⌥P is taken, it falls back to ⌃⌥P; the ••• menu shows which.
-- **Cue mode** (the default) shows one section at a time: its label beside the camera and a few keywords to talk around. It moves on when the section's time is up, or when you press →. The last cue stays up until you press → or leave.
-- **Word mode** shows the script one word at a time, with the next word faint beside it, for rehearsing. **M** switches between the two and keeps your place.
-- **Space** pauses and resumes, **← →** go back or forward a word (a section in Cue mode), **↑ ↓** change the speed by 10 words a minute (150 to start), **R** starts again from the top.
-- The time you've spent speaking is shown against the script's budget and turns amber once you're over. A thin line under the text shows how far through the script you are, section by section.
-- Monotask remembers the mode, the speed and where you were, and picks up there next time (the countdown says where from). Editing the script starts it from the top.
-- It takes the keyboard while it's up. If you click another app (to start recording, say), click the prompter once to give it the keys back.
-- Prompting is never a task: it doesn't touch Do Now or Do Next, writes no events and doesn't show in Insights.
-
-The script is a plain text file, `~/Library/Application Support/Monotask/prompter.txt`. It's created with a sample script the first time you open the prompter. Edit it from **Prompter…** in the ••• menu (paste, edit, Save, or Save and start), which also tells you how long it runs at your speed and how much to cut if it's over its budget. You can also edit the file in any text editor.
-
-| Markup | Means |
-| --- | --- |
-| `# WHO (8s)` | A section, shown as a label, with an optional time budget. The sections' budgets add up to the script's; without them it's a minute. |
-| `@cue: plain English · pet feeder` | The keywords Cue mode shows for this section, split on `·` (or commas if there's no `·`). Without one, Cue mode shows the section's emphasised words. |
-| `>> smile` | A note to yourself, shown in its own colour for a few seconds and never read as a word. |
-| `*plain English*` | Emphasis: bold and amber. |
-| `/` | A short pause, about 0.35 s. |
-| `//` | A long pause, about 0.8 s. |
-| `...` | A beat, about 0.5 s, shown as "…". |
-| `[slow] … [/slow]` | 0.75× speed for the span. `[fast] … [/fast]` is 1.25×. |
-| `{look}` | A full-width "look at the lens" flash for about 0.6 s. |
-
-Punctuation adds natural pauses on its own: about 0.2 s after a comma, 0.45 s after a full stop and 0.3 s at an em dash. A pause mark straight after punctuation replaces its pause rather than adding to it. Each word gets time for its length: a five-letter word gets one word's worth at the current speed, and shorter or longer words a little less or more.
-</details>
-
 ## Where your data lives
 
 Everything is in `~/Library/Application Support/Monotask/`:
@@ -163,7 +132,6 @@ Everything is in `~/Library/Application Support/Monotask/`:
 - `backups/` keeps the first copy of both files from each of the last 14 days.
 - `agent-context.md` is what coding agents read: your Do Now and its finish line. It exists only while something is in Do Now, and only while Monotask is running.
 - `inbox/` is where agents drop items for Do Next. Sandboxed agents use `monotask-inbox/` in your per-user temporary folder (`getconf DARWIN_USER_TEMP_DIR`) instead. Monotask imports both and empties them.
-- `prompter.txt` is the prompter's script.
 
 ## Building
 
@@ -180,7 +148,7 @@ Command Line Tools 27 ship a macOS 27 SDK where SwiftUI's `@State` needs a macro
 Checks and previews:
 
 ```bash
-.build/debug/Monotask --selftest          # the task rules, history, Insights maths, prompter, agent bridge and migration
+.build/debug/Monotask --selftest          # the task rules, history, Insights maths, agent bridge and migration
 .build/debug/Monotask --snapshot shots/   # renders every notch state with demo data
 sh plugins/monotask/test/run.sh           # the agent plugin
 ```

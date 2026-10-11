@@ -41,7 +41,7 @@ final class LidWindow: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Stay a regular app while another window (Insights, the script) is still open.
+        // Stay a regular app while another window (Insights) is still open.
         let others = NSApp.windows.contains { $0 !== window && $0.isVisible && $0.styleMask.contains(.titled) }
         guard !others else { return }
         NSApp.setActivationPolicy(.accessory)

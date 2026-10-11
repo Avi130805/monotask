@@ -7,14 +7,8 @@ enum Prefs {
     static let showWings = "showWingsBesideNotch"
     static let haptics = "haptics"
 
-    // The prompter remembers its mode, speed and place, and which script that place belongs to.
-    static let prompterMode = "prompterMode"
-    static let prompterWPM = "prompterWPM"
-    static let prompterStep = "prompterStep"
-    static let prompterScript = "prompterScriptFingerprint"
-
     /// Every key, for carrying settings over from Next.
-    static let all = [openOnHover, showWings, haptics, prompterMode, prompterWPM, prompterStep, prompterScript]
+    static let all = [openOnHover, showWings, haptics]
 
     // Lid-closed mode (the Lid-Closed Mode window). Defaults live in `LidSettings`; Next never had these.
     /// Off by default. Only true once the helper is installed.

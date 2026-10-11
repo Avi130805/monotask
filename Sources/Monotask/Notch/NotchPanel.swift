@@ -24,7 +24,7 @@ final class NotchPanel: NSPanel {
         // Spaces and full screen: on every Space, over full-screen apps, never moved by Mission Control or ⌘`.
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
-        // Focus: it takes the keyboard only when asked (forms, capture, prompter) and stays up when Monotask isn't active.
+        // Focus: it takes the keyboard only when asked (forms, capture) and stays up when Monotask isn't active.
         becomesKeyOnlyIfNeeded = true
         hidesOnDeactivate = false
         acceptsMouseMovedEvents = true

@@ -16,12 +16,6 @@ final class HotKey {
         Combo(keyCode: kVK_ANSI_N, modifiers: optionKey | controlKey, label: "⌃⌥N"),
     ]
 
-    /// The prompter's toggle, tried the same way.
-    static let prompterDefaults: [Combo] = [
-        Combo(keyCode: kVK_ANSI_P, modifiers: optionKey, label: "⌥P"),
-        Combo(keyCode: kVK_ANSI_P, modifiers: optionKey | controlKey, label: "⌃⌥P"),
-    ]
-
     let label: String
     private let ref: EventHotKeyRef
     private let id: UInt32

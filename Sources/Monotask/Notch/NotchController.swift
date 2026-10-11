@@ -6,7 +6,6 @@ import SwiftUI
 @MainActor
 final class NotchController {
     let model = NotchModel()
-    let prompter: Prompter
     private let store: Store
     private let panel = NotchPanel()
     private var screen: NSScreen?
@@ -14,11 +13,6 @@ final class NotchController {
     private var observers: [NSObjectProtocol] = []
     private var pending: [Pending: DispatchWorkItem] = [:]
     private lazy var insights = InsightsWindow(store: store)
-    private lazy var scriptWindow: ScriptWindow = {
-        let window = ScriptWindow(prompter: prompter)
-        window.onStart = { [weak self] in self?.startPrompter() }
-        return window
-    }()
 
     private enum Pending: Hashable { case peek, detail, hoverOpen, close, flash }
 
@@ -27,19 +21,16 @@ final class NotchController {
     private let windowWidth: CGFloat = 860
     private let windowHeight: CGFloat = 800
 
-    init(store: Store, prompter: Prompter) {
+    init(store: Store) {
         self.store = store
-        self.prompter = prompter
         model.onOpen = { [weak self] in self?.open() }
         model.onClose = { [weak self] in self?.close() }
         model.onRequestKeyboard = { [weak self] in self?.requestKeyboard() }
         model.onReleaseKeyboard = { [weak self] in self?.releaseKeyboard() }
         model.onCaptured = { [weak self] position in self?.didCapture(position: position) }
         model.onOpenInsights = { [weak self] in self?.showInsights() }
-        model.onStartPrompter = { [weak self] in self?.startPrompter() }
-        model.onOpenScript = { [weak self] in self?.showScript() }
 
-        let host = NotchHostingView(rootView: NotchRootView(store: store, model: model, prompter: prompter))
+        let host = NotchHostingView(rootView: NotchRootView(store: store, model: model))
         host.sizingOptions = []
         panel.contentView = host
     }
@@ -56,8 +47,7 @@ final class NotchController {
     func open() {
         cancel(.peek, .detail, .hoverOpen, .close)
         guard model.mode != .open else { return }
-        if model.mode == .prompter { prompter.leave() }
-        if model.mode == .capture || model.mode == .prompter { releaseKeyboard() }
+        if model.mode == .capture { releaseKeyboard() }
         withAnimation(Motion.open) {
             model.mode = .open
             model.peekDetail = false
@@ -67,7 +57,6 @@ final class NotchController {
     func close() {
         cancel(.peek, .detail, .hoverOpen, .close)
         guard model.mode != .closed else { return }
-        if model.mode == .prompter { prompter.leave() }
         releaseKeyboard()
         model.editingID = nil
         model.isHolding = false
@@ -95,66 +84,12 @@ final class NotchController {
             }
             requestKeyboard()
             model.focusCaptureToken += 1
-        case .prompter:
-            // Ignored while prompting, so a stray shortcut can't break into a recording.
-            break
         }
     }
 
     func showInsights() {
         close()
         insights.show()
-    }
-
-    // MARK: Prompter
-
-    /// The prompter's global shortcut: in, or back out.
-    func togglePrompter() {
-        if model.mode == .prompter {
-            close()
-        } else {
-            startPrompter()
-        }
-    }
-
-    /// Puts the script under the camera, counts down, and takes the keyboard so Space, the arrows and Esc reach it.
-    func startPrompter() {
-        cancel(.peek, .detail, .hoverOpen, .close)
-        prompter.enter()
-        model.editingID = nil
-        model.isHolding = false
-        withAnimation(Motion.open) {
-            model.mode = .prompter
-            model.page = .main
-            model.peekDetail = false
-        }
-        requestKeyboard()
-    }
-
-    func showScript() {
-        close()
-        scriptWindow.show()
-    }
-
-    /// Every key goes to the prompter while it's up, so nothing beeps or reaches a text field mid-recording.
-    private func handlePrompterKey(_ event: NSEvent) -> Bool {
-        guard event.window === panel, !event.modifierFlags.contains(.command) else { return false }
-        let key = Int(event.keyCode)
-        let arrows = [kVK_LeftArrow, kVK_RightArrow, kVK_UpArrow, kVK_DownArrow]
-        // Holding an arrow repeats it; holding anything else does it once.
-        if event.isARepeat && !arrows.contains(key) { return true }
-        switch key {
-        case kVK_Escape: close()
-        case kVK_Space: prompter.togglePause()
-        case kVK_RightArrow: prompter.forward()
-        case kVK_LeftArrow: prompter.back()
-        case kVK_UpArrow: prompter.changeSpeed(by: Pace.wpmStep)
-        case kVK_DownArrow: prompter.changeSpeed(by: -Pace.wpmStep)
-        case kVK_ANSI_R: prompter.restart()
-        case kVK_ANSI_M, kVK_Tab: prompter.switchMode()
-        default: break
-        }
-        return true
     }
 
     /// Swells at once; the details drop down only if the pointer stays, so passing over the notch on the
@@ -210,7 +145,6 @@ final class NotchController {
     /// Escape backs out one step at a time: rename, then form, then log, then the panel itself.
     /// Returns whether the key was used.
     private func handleKey(_ event: NSEvent) -> Bool {
-        if model.mode == .prompter { return handlePrompterKey(event) }
         guard event.keyCode == UInt16(kVK_Escape), model.mode.isExpanded else { return false }
         if model.editingID != nil {
             withAnimation(Motion.quick) { model.editingID = nil }
@@ -275,8 +209,8 @@ final class NotchController {
     /// its chin or the open panel never reaches whatever is behind them.
     ///
     /// It's set in every mode rather than only while collapsed: once `ignoresMouseEvents` has been set at all, `false`
-    /// makes the whole frame catch clicks, transparent parts included, which would swallow the clicks the prompter
-    /// leaves to other apps (a record button, say). Not while a button is down, so a drag keeps its window.
+    /// makes the whole frame catch clicks, transparent parts included, which would swallow clicks meant for the app
+    /// underneath. Not while a button is down, so a drag keeps its window.
     private func updateMousePassThrough(at point: CGPoint = NSEvent.mouseLocation) {
         guard NSEvent.pressedMouseButtons == 0 else { return }
         // Collapsed, the margin matches the click that opens it; open, a little more covers the pointer outrunning
@@ -320,7 +254,7 @@ final class NotchController {
                 // Wherever the event was headed, the pointer's position decides whether the window takes the next click.
                 self.updateMousePassThrough()
                 // Menus run their own tracking in their own windows; ignore those while the panel is open. A click in any
-                // other Monotask window (Insights, the script editor) is an outside click and closes the panel. Collapsed,
+                // other Monotask window (Insights) is an outside click and closes the panel. Collapsed,
                 // only the position matters: with Insights in front, the pointer's moves can be reported to that window.
                 if !Self.isMenuWindow(level: event.window?.level) || !self.model.mode.isExpanded {
                     self.handleMouse(event)
@@ -378,7 +312,7 @@ final class NotchController {
                     self.close()
                 }
             }
-        case .capture, .prompter:
+        case .capture:
             break
         }
     }
@@ -390,9 +324,6 @@ final class NotchController {
             if bodyRect(margin: 2).contains(point) { open() }
         case .open, .capture:
             if !bodyRect(margin: 2).contains(point) || cameraRect.contains(point) { close() }
-        case .prompter:
-            // Clicking elsewhere (say, a record button) leaves it up; clicking it takes the keys back.
-            if bodyRect(margin: 2).contains(point) { requestKeyboard() }
         }
     }
 

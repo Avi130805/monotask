@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// `Monotask --snapshot <folder>` renders the main notch states, the prompter, the Insights window, the script editor
-/// and the Lid-Closed Mode window, with demo data, to PNGs. Windows are parked off-screen, so it needs no screen recording permission and
-/// never touches your real list or script.
+/// `Monotask --snapshot <folder>` renders the main notch states, the Insights window and the Lid-Closed Mode window,
+/// with demo data, to PNGs. Windows are parked off-screen, so it needs no screen recording permission and
+/// never touches your real list.
 @MainActor
 enum Snapshots {
     static func run(into folder: URL) {
@@ -20,11 +20,7 @@ enum Snapshots {
         let model = NotchModel()
         model.notchSize = CGSize(width: 185, height: 33.5)
         model.hotKeyLabel = "⌥Space"
-        model.prompterHotKeyLabel = "⌥P"
-        // The sample script, written to scratch; nothing is remembered between runs.
-        let prompter = Prompter(fileURL: scratch.appendingPathComponent("prompter.txt"), defaults: nil)
-        prompter.load()
-        let (notch, notchWindow) = host(Backdrop(store: store, model: model, prompter: prompter),
+        let (notch, notchWindow) = host(Backdrop(store: store, model: model),
                                         size: CGSize(width: 860, height: 600))
 
         let historyURL = scratch.appendingPathComponent("insights-events.jsonl")
@@ -38,9 +34,6 @@ enum Snapshots {
                                           .frame(maxHeight: .infinity, alignment: .top)
                                           .background(InsightColors.background),
                                       size: CGSize(width: 860, height: 3200))
-        let (editor, editorWindow) = host(ScriptEditor(draft: ScriptDraft(text: prompter.text), prompter: prompter,
-                                                       onSave: {}, onStart: {}),
-                                          size: CGSize(width: 680, height: 640))
         // Lid-Closed Mode, posed: its settings live in a throwaway defaults suite, and no sensor or helper is touched.
         let lidSuite = "monotask-snapshot-lid-\(UUID().uuidString)"
         let lidDefaults = UserDefaults(suiteName: lidSuite) ?? .standard
@@ -48,9 +41,7 @@ enum Snapshots {
         let (lidPane, lidWindow) = host(LidSettingsView(controller: lid).defaultAppStorage(lidDefaults),
                                         size: CGSize(width: 560, height: 1_000))
         let (sheetPane, sheetWindow) = host(AddNetworkSheet(onAdd: { _ in true }, onClose: {}), size: CGSize(width: 400, height: 190))
-        let windows = [notchWindow, insightsWindow, pageWindow, editorWindow, lidWindow, sheetWindow]
-        // The first word starting with `text`; a word can carry its punctuation or a dash ("genie —").
-        func word(_ text: String) -> (PromptScript.Step) -> Bool { { $0.kind == .word && $0.text.hasPrefix(text) } }
+        let windows = [notchWindow, insightsWindow, pageWindow, lidWindow, sheetWindow]
 
         let steps: [(String, NSView, () -> Void)] = [
             ("01-closed", notch, { model.mode = .closed }),
@@ -71,23 +62,9 @@ enum Snapshots {
             }),
             ("13-closed-waiting", notch, { model.flash = nil }),
             ("14-peek-waiting", notch, { model.mode = .peek; model.peekDetail = true }),
-            ("30-prompter-countdown", notch, {
-                model.peekDetail = false
-                prompter.pose(.cue, .countdown(3))
-                model.mode = .prompter
-            }),
-            ("31-prompter-cue", notch, { prompter.pose(.cue, .playing, at: word("describe")) }),
-            ("32-prompter-word-note", notch, { prompter.pose(.word, .playing, at: word("describe")) }),
-            ("33-prompter-word-emphasis", notch, { prompter.pose(.word, .playing, at: word("harness")) }),
-            ("34-prompter-word-slow", notch, { prompter.pose(.word, .playing, at: word("genie")) }),
-            ("35-prompter-look", notch, { prompter.pose(.word, .playing, at: { $0.kind == .look }) }),
-            ("36-prompter-paused-cue", notch, { prompter.pose(.cue, .paused, at: word("Right")) }),
-            ("37-prompter-paused-word", notch, { prompter.pose(.word, .paused, at: word("Frontier")) }),
-            ("38-prompter-finished", notch, { prompter.pose(.cue, .finished, elapsed: 58) }),
             ("20-insights-window", insights, { insightsWindow.appearance = NSAppearance(named: .darkAqua) }),
             ("21-insights-dark", page, { pageWindow.appearance = NSAppearance(named: .darkAqua) }),
             ("22-insights-light", page, { pageWindow.appearance = NSAppearance(named: .aqua) }),
-            ("39-prompter-script", editor, { editorWindow.appearance = NSAppearance(named: .darkAqua) }),
             ("40-lid-off", lidPane, {
                 lidWindow.appearance = NSAppearance(named: .aqua)
                 lid.pose(reason: .off, helper: .missing)
@@ -169,8 +146,7 @@ enum Snapshots {
         let model = NotchModel()
         model.notchSize = CGSize(width: 185, height: 33.5)
         model.hotKeyLabel = "⌥Space"
-        let prompter = Prompter(fileURL: scratch.appendingPathComponent("prompter.txt"), defaults: nil)
-        let (notch, window) = host(NotchRootView(store: store, model: model, prompter: prompter),
+        let (notch, window) = host(NotchRootView(store: store, model: model),
                                    size: CGSize(width: 860, height: 600), transparent: true)
 
         let task = "Fix login redirect"
@@ -349,7 +325,6 @@ private struct SeededRandom: RandomNumberGenerator {
 private struct Backdrop: View {
     let store: Store
     let model: NotchModel
-    let prompter: Prompter
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -358,7 +333,7 @@ private struct Backdrop: View {
             Rectangle()
                 .fill(Color.white.opacity(0.22))
                 .frame(height: model.notchSize.height)
-            NotchRootView(store: store, model: model, prompter: prompter)
+            NotchRootView(store: store, model: model)
         }
     }
 }

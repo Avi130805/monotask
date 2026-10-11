@@ -5,12 +5,12 @@ import SwiftUI
 /// tuned in one place.
 ///
 /// The notch is always black, so everything on it is either one of five semantic hues or white at a set opacity.
-/// Contrast on black (WCAG): `primary` and `secondary` clear 4.5:1 for body text; `tertiary` and `quaternary`
-/// clear 3:1, so they're kept for labels, metadata and large text; every hue clears 7:1.
+/// Contrast on black (WCAG): `primary` and `secondary` clear 4.5:1 for body text; `tertiary`
+/// clears 3:1, so it's kept for labels, metadata and large text; every hue clears 7:1.
 enum Palette {
     // MARK: Hues. Amber is the only accent; each of the others means exactly one thing.
 
-    /// In progress: Do Now, its timer and live dot, the prompter's emphasis and its over-budget time. 10.6:1.
+    /// In progress: Do Now, its timer and live dot and its over-budget time. 10.6:1.
     static let accent = Color(red: 1.0, green: 0.64, blue: 0.24)
     /// Finished. 11.8:1.
     static let done = Color(red: 0.32, green: 0.86, blue: 0.48)
@@ -18,8 +18,6 @@ enum Palette {
     static let blocked = Color(red: 1.0, green: 0.82, blue: 0.36)
     /// Dropping, deleting, errors. 7.9:1.
     static let danger = Color(red: 1.0, green: 0.45, blue: 0.42)
-    /// Prompter guidance notes: never spoken, so never the colour of the words. 11.8:1.
-    static let note = Color(red: 0.56, green: 0.78, blue: 1.0)
 
     // MARK: Text
 
@@ -29,8 +27,6 @@ enum Palette {
     static let secondary = Color.white.opacity(0.62)
     /// Labels, metadata and placeholders. 3.7:1.
     static let tertiary = Color.white.opacity(0.4)
-    /// Large prompter text that has been said, or is only a preview. 3.1:1, the floor for large text.
-    static let quaternary = Color.white.opacity(0.36)
     /// Text and symbols on a light fill: the primary button, the hold button once it's done.
     static let onFill = Color.black
 
@@ -42,7 +38,7 @@ enum Palette {
     static let card = Color.white.opacity(0.065)
     /// Step 2, raised: controls at rest, focused fields, hovered or edited rows.
     static let raised = Color.white.opacity(0.1)
-    /// Step 3, hovered: controls under the pointer, the prompter's progress track.
+    /// Step 3, hovered: controls under the pointer.
     static let raisedHover = Color.white.opacity(0.15)
     /// The primary button: nearly white, white under the pointer.
     static let primaryFill = Color.white.opacity(0.9)
@@ -59,7 +55,7 @@ enum Palette {
 
     // MARK: Tints: a hue behind or under its own colour
 
-    /// Behind text of the same hue: tags, the highlighted finish line, the prompter's section label and notes.
+    /// Behind text of the same hue: tags, the highlighted finish line.
     static func wash(_ hue: Color) -> Color { hue.opacity(0.14) }
     /// A washed control under the pointer.
     static func washHover(_ hue: Color) -> Color { hue.opacity(0.26) }
@@ -70,19 +66,9 @@ enum Palette {
 
     /// The open panel's drop shadow.
     static let shadow = Color.black.opacity(0.55)
-
-    /// The prompter's karaoke line: what's been said recedes, what's coming waits a step below full white.
-    enum Script {
-        static let said = quaternary
-        static let ahead = Color.white.opacity(0.7)
-        static let aheadEmphasis = accent.opacity(0.8)
-        static let aheadPause = accent.opacity(0.55)
-        /// The next word, faint beside the one you're saying.
-        static let nextWord = quaternary
-    }
 }
 
-/// Colours for Monotask's ordinary windows (Insights, the prompter script), which follow the system's light or dark
+/// Colours for Monotask's ordinary windows (Insights, Lid-Closed Mode), which follow the system's light or dark
 /// appearance. Text uses the system's own label styles (`.primary`, `.secondary`); these cover everything else.
 /// The hues are the notch's in dark mode and deeper in light mode, so they keep their contrast on white:
 /// graphics ≥ 3:1, text ≥ 4.5:1.
@@ -102,11 +88,6 @@ enum WindowPalette {
     static let accentText = adaptive(light: NSColor(srgbRed: 0.66, green: 0.33, blue: 0, alpha: 1), dark: NSColor(Palette.accent))
     /// A neutral data series (what came in). 3.3:1 on white, 4.3:1 on the dark card.
     static let neutral = Color(nsColor: NSColor(srgbRed: 0.557, green: 0.557, blue: 0.576, alpha: 1))
-
-    /// The script editor: the system's window, text field and separator colours.
-    static let window = Color(nsColor: .windowBackgroundColor)
-    static let field = Color(nsColor: .textBackgroundColor)
-    static let fieldStroke = Color(nsColor: .separatorColor)
 
     private static func adaptive(light: NSColor, dark: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -138,8 +119,4 @@ enum Layout {
     static let openTop: CGFloat = 16
     static let openBottom: CGFloat = 28
     static let captureBottom: CGFloat = 22
-
-    /// The prompter keeps one size whatever it shows, so the notch never resizes mid-sentence.
-    static let prompterWidth: CGFloat = 600
-    static let prompterStageHeight: CGFloat = 104
 }
