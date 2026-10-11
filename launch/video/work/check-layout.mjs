@@ -1,9 +1,12 @@
 // Layout proof for the film page, without rendering video:
-//   node check-layout.mjs <guide|short> [step]
+//   node check-layout.mjs <guide|short> [step] [t0-t1 seconds, optional window]
 // For every `step`-th frame (and every caption's midpoint) it checks:
 //   1. captions: at most 2 lines, and no line holds a single word (no orphans)
 //   2. the opening caption breaks as "One task. One finish line." / "Your coding agents know both."
 //   3. menu-bar titles and clock: either fully inside the 1920x1080 frame or invisible (opacity < 0.02)
+//   4. terminal beats (any terminal window visible): no terminal row is partially inside the frame
+//      (a frame edge must fall between rows, never through one)
+//   5. terminal beats: the caption pill overlaps no rendered (non-blank) terminal text
 // Exits 1 on any failure and prints each one.
 import { chromium } from "playwright";
 import path from "node:path";
@@ -24,13 +27,18 @@ const info = await page.evaluate(() => window.FILM);
 const frames = new Set();
 for (let n = 0; n < info.frames; n += step) frames.add(n);
 for (const c of info.timeline.captions) frames.add(Math.round(((c.t0 + c.t1) / 2) * 30));
+if (process.argv[4]) {
+  const [a, b] = process.argv[4].split("-").map(Number);
+  for (const n of [...frames]) if (n < a * 30 || n > b * 30) frames.delete(n);
+}
 
 const fails = [];
 const seen = new Map();
+let termFrames = 0;
 for (const n of [...frames].sort((a, b) => a - b)) {
   await page.evaluate((n) => window.renderFrame(n), n);
   const r = await page.evaluate(() => {
-    const out = { lines: null, menu: [] };
+    const out = { lines: null, menu: [], rows: [], text: [], cap: null };
     const cap = document.getElementById("caption");
     const line = cap.querySelector(".line");
     if (Number(getComputedStyle(cap).opacity) > 0.02 && line.textContent) {
@@ -59,6 +67,28 @@ for (const n of [...frames].sort((a, b) => a - b)) {
       const b = el.getBoundingClientRect();
       out.menu.push({ text: el.textContent, left: b.left, right: b.right, top: b.top, bottom: b.bottom, op: vis(el) });
     }
+    for (const win of document.querySelectorAll(".win")) {
+      if (win.style.display === "none" || vis(win) < 0.02) continue;
+      const title = win.querySelector(".bar").textContent;
+      win.querySelectorAll(".xterm-rows > div").forEach((row, i) => {
+        const b = row.getBoundingClientRect();
+        out.rows.push({ title, i, top: b.top, bottom: b.bottom });
+        const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+        for (let node; (node = walker.nextNode()); ) {
+          const re = /\S+/g;
+          for (let m; (m = re.exec(node.data)); ) {
+            const rg = document.createRange();
+            rg.setStart(node, m.index); rg.setEnd(node, m.index + m[0].length);
+            for (const r of rg.getClientRects())
+              out.text.push({ title, i, word: m[0], left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+          }
+        }
+      });
+    }
+    if (Number(getComputedStyle(cap).opacity) > 0.02) {
+      const b = cap.getBoundingClientRect();
+      out.cap = { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+    }
     return out;
   });
   const t = (n / 30).toFixed(2);
@@ -75,9 +105,19 @@ for (const n of [...frames].sort((a, b) => a - b)) {
     const clipped = m.left < 0 || m.right > 1920 || m.top < 0 || m.bottom > 1080;
     if (clipped && m.op >= 0.02) fails.push(`${t}s menu "${m.text}" clipped (${m.left.toFixed(0)}..${m.right.toFixed(0)}) at opacity ${m.op.toFixed(2)}`);
   }
+  for (const row of r.rows) {
+    const cut = (row.top < 0 && row.bottom > 0.5) || (row.top < 1079.5 && row.bottom > 1080);
+    if (cut) fails.push(`${t}s terminal "${row.title}" row ${row.i} cut by frame edge (y ${row.top.toFixed(1)}..${row.bottom.toFixed(1)})`);
+  }
+  if (r.cap) {
+    const c = r.cap;
+    const hit = r.text.find((w) => w.right > c.left && w.left < c.right && w.bottom > c.top && w.top < c.bottom);
+    if (hit) fails.push(`${t}s caption (y ${c.top.toFixed(0)}..${c.bottom.toFixed(0)}) covers terminal "${hit.title}" row ${hit.i} text "${hit.word}"`);
+  }
+  if (r.rows.length) termFrames++;
 }
 await browser.close();
-console.log(`cut=${cut} frames checked=${frames.size}`);
+console.log(`cut=${cut} frames checked=${frames.size} (terminal frames ${termFrames})`);
 for (const [k, t] of seen) console.log(`  caption @${t}s: ${k}`);
 const uniq = [...new Set(fails)];
 for (const f of uniq.slice(0, 40)) console.log("FAIL", f);
