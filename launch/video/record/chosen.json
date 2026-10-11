@@ -1,0 +1,9 @@
+{
+  "r1": {
+    "take": "r1-take1",
+    "rows": {
+      "finishLine": {"t": 26.0, "text": "\"Done when\" line"},
+      "offer": {"t": 26.0, "text": "Separate from this task"}
+    }
+  }
+}

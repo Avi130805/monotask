@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Monotask guide film</title>
+<link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+<style>
+@font-face { font-family: "Inter"; font-weight: 400; src: url(../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 500; src: url(../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2) format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 600; src: url(../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 700; src: url(../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url(../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 700; src: url(../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2) format("woff2"); }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+#stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden;
+  font-family: "Inter", sans-serif; -webkit-font-smoothing: antialiased; }
+#world { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+#wallpaper { position: absolute; inset: 0; background: linear-gradient(180deg, #6B85AD 0%, #DBC2A8 100%); }
+#menubar { position: absolute; left: 0; top: 0; width: 1920px; height: 24px; background: rgba(255,255,255,0.22);
+  backdrop-filter: blur(30px) saturate(1.4); display: flex; align-items: center; padding: 0 18px;
+  font-size: 13.5px; color: rgba(255,255,255,0.96); letter-spacing: 0.01em; }
+#menubar .menus span { margin-right: 22px; font-weight: 500; }
+#menubar .menus span.app { font-weight: 700; }
+#menubar .clock { margin-left: auto; font-weight: 500; }
+
+/* Terminal windows */
+.win { position: absolute; border-radius: 10px; overflow: hidden; background: #1E1E1E;
+  box-shadow: 0 0 0 0.5px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08) inset, 0 22px 70px rgba(20,24,40,0.45), 0 6px 18px rgba(20,24,40,0.25); }
+.win .bar { height: 30px; background: #2B2B2B; border-bottom: 1px solid #0d0d0d; position: relative;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #b9b9b9; }
+.win .lights { position: absolute; left: 12px; top: 9px; display: flex; gap: 8px; }
+.win .lights i { width: 12px; height: 12px; border-radius: 50%; background: #5a5a5c; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.35); display: block; }
+.win .body { padding: 10px 14px 12px 14px; }
+.win .badge { position: absolute; right: 12px; top: 5px; height: 20px; padding: 0 9px; border-radius: 10px;
+  background: rgba(255,163,61,0.18); color: #FFA33D; font: 600 12px "Inter"; line-height: 20px; letter-spacing: 0.04em; opacity: 0; }
+.xterm .xterm-viewport { overflow: hidden !important; background: #1E1E1E !important; }
+.xterm-cursor-layer, .xterm .composition-view { display: none; }
+
+/* Plain glass card (Codex, no recording) */
+.card { position: absolute; border-radius: 14px; background: rgba(22,22,26,0.82); backdrop-filter: blur(24px);
+  box-shadow: 0 22px 70px rgba(20,24,40,0.45); color: #fff; padding: 40px 48px; }
+.card h2 { margin: 0 0 26px 0; font: 600 38px "Inter"; letter-spacing: -0.01em; }
+.card pre { margin: 0; font: 400 24px/1.75 "JetBrains Mono"; color: #e8e8e8; }
+.card pre b { color: #8a8a8f; font-weight: 400; }
+.card .note { margin-top: 22px; font: 500 20px "Inter"; color: #b6b6bc; }
+
+/* Notch */
+#notch { position: absolute; left: 0; top: 0; width: 1720px; height: 1200px; transform-origin: 0 0; pointer-events: none; }
+#notch img, #notch .shape { position: absolute; left: 0; top: 0; }
+#notch img { width: 1720px; height: 1200px; }
+#notch .shape { background: #000; }
+
+/* Cursor */
+#cursor { position: absolute; left: 0; top: 0; width: 28px; height: 40px; transform-origin: 3px 3px; }
+
+/* End card */
+#endcard { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; color: #fff; opacity: 0; padding-top: 70px; }
+#endcard .panel { background: rgba(14,14,18,0.55); backdrop-filter: blur(26px); border-radius: 26px; padding: 54px 84px 56px;
+  display: flex; flex-direction: column; align-items: center; box-shadow: 0 30px 80px rgba(20,24,40,0.35); }
+#endcard h1 { margin: 0; font: 700 92px "Inter"; letter-spacing: -0.03em; }
+#endcard .sub { margin-top: 10px; font: 500 28px "Inter"; color: rgba(255,255,255,0.78); }
+#endcard pre { margin: 36px 0 0 0; font: 400 26px/1.8 "JetBrains Mono"; color: #f2f2f2; text-align: left; }
+
+/* Screen-space overlays */
+#caption { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); max-width: 1000px;
+  padding: 20px 38px 24px; border-radius: 18px; background: rgba(10,10,12,0.62); backdrop-filter: blur(20px);
+  text-align: center; opacity: 0; }
+#caption .step { font: 700 17px "Inter"; letter-spacing: 0.16em; color: #FFA33D; text-transform: uppercase; margin-bottom: 8px; }
+#caption .line { font: 600 34px/1.3 "Inter"; color: #fff; letter-spacing: -0.005em; }
+#keys { position: absolute; left: 50%; bottom: 210px; transform: translateX(-50%); display: flex; gap: 10px; opacity: 0; }
+#keys .k { min-width: 64px; height: 64px; padding: 0 18px; border-radius: 12px; background: rgba(250,250,252,0.92);
+  box-shadow: 0 2px 0 rgba(0,0,0,0.25), 0 10px 30px rgba(0,0,0,0.25); color: #222; display: flex; align-items: center;
+  justify-content: center; font: 600 28px "Inter"; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="world">
+    <div id="wallpaper"></div>
+    <div id="menubar"><div class="menus"><span class="app">Terminal</span><span>Shell</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></div><div class="clock">Sun 10:41</div></div>
+    <div id="windows"></div>
+    <div id="endcard"><div class="panel">
+      <h1>Monotask</h1>
+      <div class="sub">Free and open source · MIT</div>
+      <pre>github.com/Avi130805/monotask
+/plugin marketplace add Avi130805/monotask
+codex plugin marketplace add Avi130805/monotask</pre>
+    </div></div>
+    <div id="notch"></div>
+    <svg id="cursor" viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 3 L3 30 L9.6 23.8 L13.8 33.6 L18.2 31.8 L14.1 22.2 L23 22.2 Z" fill="#000" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <div id="keys"></div>
+  <div id="caption"><div class="step"></div><div class="line"></div></div>
+</div>
+<script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="data.js"></script>
+<script src="film.js"></script>
+</body>
+</html>
